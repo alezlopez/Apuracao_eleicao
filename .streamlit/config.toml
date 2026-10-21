@@ -1,4 +1,8 @@
 [theme]
+base = "light"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f7f6f3"
+textColor = "#1f1f1d"
 # Neutro: vermelho e azul são reservados para Lula e Flávio.
 primaryColor = "#3d3d3a"
 

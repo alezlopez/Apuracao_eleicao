@@ -172,3 +172,17 @@ você digita os números por estado. Os visitantes não veem essa aba. Sem `ADMI
 
 Para os amigos: mande só o link do domínio. O painel abre em *Ao vivo*. Antes das 17h de domingo ele mostra o aviso
 de espera e o **Ensaio** (o 1º turno reapresentado). A aba *Como funciona* explica o método em linguagem simples.
+
+## Painel público (design e textos)
+
+- Azul = Flávio, vermelho = Lula em todo o site (par validado para daltonismo). Títulos em Archivo e texto em Source Sans 3 (Google Fonts).
+- **Ao vivo:** os cartões de chance dos dois candidatos lado a lado, o placar projetado em % dos válidos, a contagem do TSE
+  separada da projeção e um mapa do Brasil por estado (malha do IBGE em `data/geo/br_uf.geojson`, gerada a partir
+  da API de malhas do IBGE).
+- **Como funciona:** o método em 6 passos e os testes ilustrados: o filme da noite, o erro do modelo contra o erro da
+  contagem, cada uma das 6 ordens de chegada explicada e com seu gráfico, o mapa de calor da chance dada ao vencedor real
+  e a cobertura da faixa provável. Todos os números desses textos são calculados de `data/backtest/resultados.csv`.
+- **Antes da apuração:** os 6 cenários num gráfico só, cada um explicado (o que muda em relação ao Base e de onde veio),
+  com os controles avançados escondidos. Nomes: Base, Vento a favor de Flávio, Vento a favor de Lula,
+  Nordeste vai mais às urnas, Sudeste falta mais, Repete 2022.
+- Regiões e estados aparecem sempre por extenso.
