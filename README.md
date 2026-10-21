@@ -9,8 +9,8 @@ Projeto pessoal. Lula (13) x Flávio Bolsonaro (22), domingo 25/10/2026.
 | 1. Coletor do TSE | **feito**: testado no 1º turno (100%) e no 2º turno (arquivos já publicados, zerados) |
 | 2. Base 1º turno 2026 por município | **feito** (`data/base/`). 2018/2022/2026 por zona em `data/hist/` |
 | 3. Parte A + Monte Carlo + sliders | **feito**: `src/model.py`, calibração em `src/calibrate.py`, painel `app.py` |
-| 4. Parte B + backtest | pendente |
-| 5. Ensaio geral | pendente |
+| 4. Parte B + backtest | **feito**: `src/live.py`, `src/backtest.py` |
+| 5. Ensaio geral | replay do 1º turno 2026 pronto (`python src/backtest.py --replay`); falta rodar com o coletor de ponta a ponta |
 
 ## Coletor (`src/collector.py`)
 
@@ -99,3 +99,44 @@ Resultado com os priors atuais, que ainda não passaram por backtest: Base P(Fl�
 (80%: +0,6 a +6,4). A Quaest (46 x 44) implica cerca de +2,2 p.p. nos válidos. O modelo é mais pró-Flávio que a
 pesquisa porque parte do +1,87 do 1º turno e soma a transferência 46/32 da terceira via. O tornado mostra que
 viés nacional, σ nacional, retenções e terceira via dominam. Comparecimento regional quase não move P(F).
+
+## Parte B (`src/live.py`)
+
+Unidade = município (ao vivo) ou zona (backtest). Swing em logit contra o prior de cada unidade, modelo hierárquico
+gaussiano (intercepto + lean + porte + efeito por região + efeito por UF), projeção do que falta por Monte Carlo.
+Nunca extrapola a parcial nacional.
+
+Incertezas que o backtest obrigou a incluir:
+- **Choque comum no que falta (`sd_resto` = 2 p.p.)**: sem ele, os intervalos de 80% cobriam o resultado só 10–20%
+  das vezes no 1º turno 2026. O erro RMS da margem da parte não apurada foi ~2 p.p. nas ordens realistas.
+- **Pouco apurado (`f_min` = 10%)**: abaixo disso o choque cresce com √(10%/apurado). No replay, com 1,7% apurado,
+  o modelo projetava +7,7 com P(F) ≈ 1 (final: +2,0).
+- **Exterior (`tau_ex`)**: chega primeiro por causa do fuso (118 de 267 unidades às 18h10 no replay) e tem swing próprio.
+
+## Backtest (`src/backtest.py`) e resultados
+
+Zona eleitoral como unidade, contada inteira no horário da sua última totalização (aproximação da ordem real;
+para o 2º turno de 2022 ela comprime a virada que houve na apuração). 10 ordens: real, 5 aleatórias, por porte e
+2 adversárias (redutos de um lado primeiro, ordenadas pelo resultado real, ou seja, impossíveis na prática).
+
+| | 2º turno 2022 (prior 46/32, errado de propósito) | 1º turno 2026 (prior = 2º turno 2022) |
+|---|---|---|
+| Erro médio da margem com 30% / 50% / 70% (ordens realistas) | 0,15 / 0,14 / 0,05 p.p. | 1,1 / 0,6 / 0,45 p.p. |
+| Erro da parcial ingênua com 50% | 7,2 p.p. | 8,2 p.p. |
+| Cobertura do intervalo de 80% (realistas) | 100% (conservador) | 75–88% |
+| P(vencedor real) ≥ 99% a partir de | 60–70% apurado em todas as ordens | 20–60% nas realistas |
+| Confiante (≥95%) no lado errado | nunca | ordem "redutos do Lula primeiro", até 60% |
+
+O caso de domingo (prior = 1º turno 2026 nas mesmas unidades) tem a mesma estrutura do 2º turno de 2022, que foi o caso robusto.
+Mas são só duas eleições, e a unidade do backtest (zona inteira) é mais grossa que a do ao vivo (município parcial).
+
+## Painel
+
+```bash
+python src/collector.py --ele 6258 --interval 60   # terminal 1, domingo a partir das 16h50
+streamlit run app.py                               # terminal 2
+```
+
+Abas: **Ao vivo** (fonte: coletor, manual ou replay), **Cenário pré-apuração** (Parte A com sliders), **Backtest** e
+**Entrada manual** (plano B). O painel processa cada snapshot novo sozinho e atualiza a cada 60 s.
+`python src/export_painel.py` exporta os CSVs da versão publicada (somente leitura) do painel.
