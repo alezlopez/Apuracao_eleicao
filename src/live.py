@@ -253,6 +253,7 @@ def processar(snap: Path, prior: pd.DataFrame, h: Hiper = Hiper()) -> dict:
     res["snapshot"] = snap.name
     res["coletado_em"] = meta.get("coletado_em")
     res["tse_ht"] = meta.get("tse_ht")
+    res["origem"] = meta.get("origem", "tse")
     (snap / "projecao.json").write_text(json.dumps(res, ensure_ascii=False, indent=1))
     return res
 

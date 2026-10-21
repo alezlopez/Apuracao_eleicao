@@ -140,3 +140,35 @@ streamlit run app.py                               # terminal 2
 Abas: **Ao vivo** (fonte: coletor, manual ou replay), **Cenário pré-apuração** (Parte A com sliders), **Backtest** e
 **Entrada manual** (plano B). O painel processa cada snapshot novo sozinho e atualiza a cada 60 s.
 `python src/export_painel.py` exporta os CSVs da versão publicada (somente leitura) do painel.
+
+## Publicar no Easypanel
+
+O contêiner (`Dockerfile` + `start.sh`) roda tudo sozinho: gera o ensaio na primeira subida, mantém o coletor do TSE
+rodando (reinicia em 30 s se cair), calcula a projeção uma vez por atualização do TSE e serve o painel na porta 8501.
+Testado aqui subindo de uma cópia limpa: painel no ar em ~40 s, primeira coleta completa em ~50 s.
+(Não deu para construir a imagem Docker neste ambiente; o `start.sh` foi testado direto.)
+
+1. **Projeto → + Serviço → App.**
+2. **Fonte:** GitHub, repositório `alezlopez/apuracao_eleicao`, branch `ccr-82f4e1c3-h0zfwi` (ou `main`, depois do merge).
+   Se o repositório for privado, o Easypanel precisa ter acesso ao GitHub.
+3. **Build:** Dockerfile (caminho `Dockerfile`).
+4. **Ambiente:**
+   ```
+   ADMIN_TOKEN=<uma senha longa>
+   INTERVALO=60
+   ```
+5. **Volumes (Mounts):** volume `snapshots` em `/app/data/snapshots` e volume `cache` em `/app/data/cache`.
+   Sem eles, um reinício apaga o histórico do gráfico da noite.
+6. **Domínio:** aponte para a porta **8501**. O HTTPS o Easypanel faz sozinho.
+7. **Recursos:** 2 GB de RAM recomendados (cálculo da projeção: pico de ~300 MB; mínimo 1 GB).
+8. **Deploy** e confira os logs. O certo é aparecer
+   `TSE - | seções 0.00% | ... mun baixados 5757 | erros 0` e depois `sem novidade no TSE` a cada minuto.
+
+**Confira no seu servidor antes de domingo:** que os logs mostram `erros 0` (o servidor alcança `resultados.tse.jus.br`).
+Se o TSE recusar o IP do servidor, o coletor vai registrar `ciclo falhou`, e aí o plano B é a entrada manual.
+
+**Administração (plano B):** abra `https://seu-dominio/?admin=<ADMIN_TOKEN>`. Aparece a aba *Administração*, onde
+você digita os números por estado. Os visitantes não veem essa aba. Sem `ADMIN_TOKEN` definido, ela não aparece para ninguém.
+
+Para os amigos: mande só o link do domínio. O painel abre em *Ao vivo*. Antes das 17h de domingo ele mostra o aviso
+de espera e o **Ensaio** (o 1º turno reapresentado). A aba *Como funciona* explica o método em linguagem simples.

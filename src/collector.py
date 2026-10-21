@@ -16,6 +16,10 @@ data/snapshots/e{ele}/{AAAAMMDD-HHMMSS}/ com uf.csv, mun.csv e meta.json.
 Uso:
   python src/collector.py --ele 6257 --once        # snapshot do 1º turno
   python src/collector.py --ele 6258 --interval 60 # ao vivo no domingo
+
+Sem novidade no TSE, não grava snapshot. A cada 20 ciclos baixa todos os municípios de novo
+(pega correções que não mudam o número de seções). Depois de gravar, calcula a projeção
+(projecao.json, via src/live.py), para o painel só ler, por mais gente que esteja olhando.
 """
 
 from __future__ import annotations
@@ -31,12 +35,15 @@ from pathlib import Path
 import pandas as pd
 import requests
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 BASE = "https://resultados.tse.jus.br/oficial/ele2026"
 ROOT = Path(__file__).resolve().parent.parent
 SNAP_DIR = ROOT / "data" / "snapshots"
 CACHE_DIR = ROOT / "data" / "cache"
 
 LULA, FLAVIO = "13", "22"
+RECARGA_TOTAL = 20   # ciclos entre recargas completas
 
 SESSION = requests.Session()
 SESSION.headers["User-Agent"] = "apuracao-eleicao/0.1 (projeto pessoal, estimativa nao oficial)"
@@ -113,6 +120,8 @@ class Collector:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.muns = municipios(ele)
         self.ufs = sorted(self.muns["uf"].unique())
+        self.n = 0
+        self.prior = None
 
     def _cache_path(self, uf: str, cd: str) -> Path:
         return self.cache_dir / f"{uf}{cd}.json"
@@ -121,8 +130,16 @@ class Collector:
         d = get_json(self.ele, f"dados/{uf}/{uf}{cd}-c0001-{{e}}-u.json")
         self._cache_path(uf, cd).write_text(json.dumps(d, ensure_ascii=False))
 
-    def cycle(self) -> Path:
+    def _ultimo(self) -> dict | None:
+        root = SNAP_DIR / f"e{self.ele}"
+        snaps = sorted(p for p in root.glob("*/meta.json")) if root.exists() else []
+        return json.loads(snaps[-1].read_text()) if snaps else None
+
+    def cycle(self) -> Path | None:
+        """Grava um snapshot e devolve a pasta, ou None quando nada mudou desde o último."""
         t0 = time.time()
+        self.n += 1
+        recarga = self.n % RECARGA_TOTAL == 0
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         with ThreadPoolExecutor(self.workers) as ex:
             br_f = ex.submit(get_json, self.ele, "dados/br/br-c0001-{e}-u.json")
@@ -140,7 +157,7 @@ class Collector:
             cached_st = None
             if p.exists():
                 cached_st = _int(json.loads(p.read_text())["s"]["st"])
-            if cached_st != st:
+            if recarga or cached_st != st:
                 todo.append((uf, cd))
             st_mun[(uf, cd)] = st
         errors = []
@@ -151,6 +168,12 @@ class Collector:
                     f.result()
                 except Exception as exc:  # um município falhar não derruba o snapshot
                     errors.append(f"{futs[f]}: {exc}")
+
+        ult = self._ultimo()
+        if not recarga and not errors and ult and ult["br"].get("st") == br["st"] \
+                and ult["br"].get("lula") == br["lula"] and ult["br"].get("flavio") == br["flavio"] \
+                and ult.get("tse_ht") == br["ht"]:
+            return None
 
         mun_rows = []
         for _, m in self.muns.iterrows():
@@ -177,7 +200,19 @@ class Collector:
             "erros": errors, "segundos": round(time.time() - t0, 1),
         }
         (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))
+        self.projetar(out)
         return out
+
+    def projetar(self, out: Path) -> None:
+        if self.ele != "6258":
+            return
+        try:
+            import live
+            if self.prior is None:
+                self.prior = live.prior_para(out.parent)
+            live.processar(out, self.prior)
+        except Exception as exc:  # o painel tenta de novo se faltar a projeção
+            print(f"projeção falhou em {out.name}: {exc}", file=sys.stderr, flush=True)
 
 
 def main(argv=None) -> int:
@@ -188,10 +223,18 @@ def main(argv=None) -> int:
     ap.add_argument("--workers", type=int, default=16)
     a = ap.parse_args(argv)
 
-    col = Collector(a.ele, a.workers)
+    col = None
     while True:
         try:
+            if col is None:
+                col = Collector(a.ele, a.workers)
             out = col.cycle()
+            if out is None:
+                print(f"[{datetime.now():%H:%M:%S}] sem novidade no TSE", flush=True)
+                if a.once:
+                    return 0
+                time.sleep(a.interval)
+                continue
             meta = json.loads((out / "meta.json").read_text())
             br = meta["br"]
             pct = 100 * br["st"] / br["ts"] if br["ts"] else 0

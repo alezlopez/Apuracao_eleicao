@@ -1,3 +1,15 @@
 [theme]
 # Neutro: vermelho e azul são reservados para Lula e Flávio.
 primaryColor = "#3d3d3a"
+
+[server]
+headless = true
+runOnSave = false
+fileWatcherType = "none"
+
+[client]
+# Esconde menu de desenvolvedor e botão "Deploy" para os visitantes.
+toolbarMode = "viewer"
+
+[browser]
+gatherUsageStats = false

@@ -1,7 +1,7 @@
-pandas
-numpy
-scipy
-requests
-remotezip
-streamlit
-plotly
+numpy==2.5.3
+pandas==3.0.5
+plotly==7.1.0
+remotezip==0.12.6
+requests==2.34.2
+scipy==1.18.1
+streamlit==1.66.1

@@ -45,8 +45,12 @@ def main() -> int:
     cols = ["uf", "ts", "st", "te", "est", "comp", "abst", "validos", "brancos", "nulos", "dt", "ht", "lula", "flavio", "outros"]
     df[cols].to_csv(out / "uf.csv", index=False)
     br = {c: int(df[c].sum()) for c in ["ts", "st", "te", "est", "validos", "brancos", "nulos", "lula", "flavio"]}
-    meta = {"ele": "6258", "origem": "manual", "coletado_em": datetime.now().isoformat(timespec="seconds"), "br": br}
+    meta = {"ele": "6258", "origem": "manual", "coletado_em": datetime.now().isoformat(timespec="seconds"),
+            "tse_ht": datetime.now().strftime("%H:%M:%S"), "br": br}
     (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import live
+    live.processar(out, live.prior_para(out.parent))
     print(f"{len(p)} UFs | seções {100 * br['st'] / br['ts']:.2f}% | Lula {br['lula']:,} x Flávio {br['flavio']:,} -> {out.relative_to(ROOT)}")
     return 0
 
