@@ -266,10 +266,12 @@ def aba_ao_vivo():
             if not hist:
                 st.info("O ensaio ainda não foi gerado no servidor.")
                 return
-            padrao = next((i for i, h in enumerate(hist) if h["pct_apurado"] >= 10), 0)
-            i = st.select_slider("Horário (4/10/2026, Brasília)", options=list(range(len(hist))), value=padrao,
-                                 format_func=lambda k: hist[k]["tse_ht"][:5])
-            hist = hist[: i + 1]
+            # Opções são os próprios horários (texto): nada de função de formatação presa a uma lista que muda.
+            horarios = [h["tse_ht"][:5] for h in hist]
+            padrao = next((h["tse_ht"][:5] for h in hist if h["pct_apurado"] >= 10), horarios[0])
+            escolhido = st.select_slider("Horário (4/10/2026, Brasília)", options=horarios, value=padrao,
+                                         key=f"horario_ensaio_{len(horarios)}")
+            hist = hist[: horarios.index(escolhido) + 1]
         if not hist or hist[-1]["pct_apurado"] == 0:
             duelo(0.5, 0.5, "—", "—", "aguardando a apuração", "aguardando a apuração")
             st.info("A divulgação do TSE começa às **17h (Brasília)** de domingo. Esta página se atualiza sozinha a cada "

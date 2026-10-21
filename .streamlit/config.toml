@@ -12,6 +12,8 @@ runOnSave = false
 fileWatcherType = "none"
 
 [client]
+# Visitantes não veem rastros de erro; o detalhe vai para o log do servidor.
+showErrorDetails = "none"
 # Esconde menu de desenvolvedor e botão "Deploy" para os visitantes.
 toolbarMode = "viewer"
 
