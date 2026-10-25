@@ -66,7 +66,7 @@ def secoes(pleito: str, uf: str = "zz") -> list[tuple[str, str, str]]:
 
 
 class ColetorBU:
-    def __init__(self, pleito: str, ele: str, uf: str = "zz", workers: int = 6):
+    def __init__(self, pleito: str, ele: str, uf: str = "zz", workers: int = 12):
         self.pleito, self.ele, self.uf, self.workers = pleito, ele, uf, workers
         self.cache = ROOT / "data" / "cache" / f"bu-p{pleito}-{uf}"
         self.cache.mkdir(parents=True, exist_ok=True)
@@ -109,8 +109,13 @@ class ColetorBU:
 
     def ciclo(self) -> pd.DataFrame:
         self.falhas = {}
+        n, t0, res = len(self.secoes), time.time(), []
         with ThreadPoolExecutor(self.workers) as ex:
-            res = list(ex.map(lambda s: self._secao_segura(*s), self.secoes))
+            for i, r in enumerate(ex.map(lambda s: self._secao_segura(*s), self.secoes), 1):
+                res.append(r)
+                if i % 500 == 0 and i < n:
+                    print(f"  ... {i}/{n} urnas consultadas ({sum(x is not None for x in res)} com boletim, "
+                          f"{time.time() - t0:.0f}s)", flush=True)
         rows = []
         for r in res:
             if r:
