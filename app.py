@@ -35,7 +35,9 @@ FONTE = "Source Sans 3, Source Sans Pro, sans-serif"
 SNAPS = ROOT / "data" / "snapshots"
 DOMINGO = ["e6258", "e6258-manual"]   # coletor do TSE; entrada manual (plano B)
 EXTERIOR_BU = "e6258-bu"              # boletins de urna do exterior, antes da divulgação oficial
-ENSAIO = "replay-t1-2026"
+REG_NOME = {"N": "Norte", "NE": "Nordeste", "CO": "Centro-Oeste", "SE": "Sudeste", "S": "Sul", "EX": "Exterior"}
+REG_ORDEM = ["NE", "SE", "S", "N", "CO", "EX"]
+FONTE_FORCADA = os.environ.get("PAINEL_FONTE", "")   # só para testes locais (ex.: replay-t1-2026)
 N_SIM = 20000
 
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
@@ -78,7 +80,44 @@ st.html("""
   .ap-ok { color: #0c7a0c; font-weight: 600; } .ap-ruim { color: #a35a00; font-weight: 600; }
   .stTabs [data-baseweb="tab-list"] { gap: .25rem; }
   .stTabs [data-baseweb="tab"] { font-family: 'Archivo', sans-serif; font-weight: 600; font-size: 1rem; }
-  @media (max-width: 640px) { .ap-duelo { grid-template-columns: 1fr; } .ap-card.l { text-align: left; } }
+  .ap-card .linha { display: flex; justify-content: space-between; gap: .5rem; font-size: .92rem; color: #3d3d3a;
+                    border-top: 1px solid rgba(0,0,0,.06); padding-top: .35rem; margin-top: .45rem; }
+  .ap-card.l .linha { flex-direction: row-reverse; }
+  .ap-card .linha b { font-variant-numeric: tabular-nums; }
+  .ap-prog { margin: .9rem 0 .4rem; }
+  .ap-prog .rot { display: flex; justify-content: space-between; font-size: .85rem; color: var(--neutro); margin-bottom: .25rem; }
+  .ap-prog .rot b { color: var(--tinta); font-family: 'Archivo', sans-serif; font-size: 1.05rem; }
+  .ap-prog .trilho { height: 10px; border-radius: 5px; background: #ecebe7; overflow: hidden; }
+  .ap-prog .trilho span { display: block; height: 100%; background: var(--tinta); border-radius: 5px; }
+  .ap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: .75rem; margin: .5rem 0 1rem; }
+  .ap-grid.uf { grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); }
+  .ap-rc { border: 1px solid var(--linha); border-left: 5px solid #c9c7c0; border-radius: 10px; padding: .75rem .9rem;
+           background: #fff; display: flex; flex-direction: column; gap: .35rem; font-family: 'Source Sans 3', sans-serif; }
+  .ap-rc.f { border-left-color: var(--flavio); } .ap-rc.l { border-left-color: var(--lula); }
+  .ap-rc .topo { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; }
+  .ap-rc .nome { font-family: 'Archivo', sans-serif; font-weight: 700; font-size: 1.05rem; color: var(--tinta); }
+  .ap-rc .apu { font-size: .78rem; color: var(--neutro); white-space: nowrap; }
+  .ap-rc .mini { height: 4px; border-radius: 2px; background: #ecebe7; overflow: hidden; }
+  .ap-rc .mini span { display: block; height: 100%; background: var(--tinta); }
+  .ap-rc .split { display: flex; height: 22px; border-radius: 5px; overflow: hidden; background: #ecebe7; font-size: .78rem;
+                  font-weight: 600; color: #fff; line-height: 22px; }
+  .ap-rc .split span { padding: 0 .4rem; white-space: nowrap; overflow: hidden; }
+  .ap-rc .split .f { background: var(--flavio); } .ap-rc .split .l { background: var(--lula); text-align: right; }
+  .ap-rc .split .vazio { color: var(--neutro); font-weight: 400; }
+  .ap-rc .votos { display: flex; justify-content: space-between; font-size: .8rem; color: var(--neutro); font-variant-numeric: tabular-nums; }
+  .ap-rc .proj { font-size: .92rem; color: #3d3d3a; }
+  .ap-rc .proj b.f, .ap-rc .t1 b.f { color: var(--flavio); } .ap-rc .proj b.l, .ap-rc .t1 b.l { color: var(--lula); }
+  .ap-rc .t1 { font-size: .8rem; color: var(--neutro); }
+  .ap-sec { font-family: 'Archivo', sans-serif; font-weight: 800; font-size: 1.5rem; margin: 1.6rem 0 .1rem; color: var(--tinta); }
+  .ap-secsub { color: var(--neutro); margin: 0 0 .4rem; font-size: .95rem; }
+  .ap-det { border: 1px solid var(--linha); border-radius: 12px; padding: 1rem 1.1rem; background: var(--fundo2); }
+  .ap-det h3 { margin: 0 0 .2rem; }
+  .ap-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: .6rem; margin-top: .6rem; }
+  .ap-kpi { background: #fff; border: 1px solid var(--linha); border-radius: 10px; padding: .55rem .75rem; }
+  .ap-kpi .k { font-size: .75rem; color: var(--neutro); text-transform: uppercase; letter-spacing: .05em; }
+  .ap-kpi .v { font-family: 'Archivo', sans-serif; font-weight: 700; font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+  @media (max-width: 640px) { .ap-duelo { grid-template-columns: 1fr; } .ap-card.l { text-align: left; }
+                              .ap-card.l .linha { flex-direction: row; } }
 </style>
 """)
 
@@ -102,6 +141,13 @@ def vantagem(m: float | None, d: int = 1, dir_nome: str = "Flávio") -> str:
     if abs(m) < 0.05:
         return "empate"
     return f"{dir_nome if m > 0 else 'Lula'} +{br(abs(m), d)}"
+
+
+def faixa(lo: float, hi: float) -> str:
+    """Faixa provável escrita do menor para o maior lado a lado ("Lula +38,2 a Lula +41,8")."""
+    if lo < 0 and hi < 0:
+        lo, hi = hi, lo
+    return f"{vantagem(lo)} a {vantagem(hi)}"
 
 
 def placar(m: float) -> str:
@@ -228,6 +274,8 @@ def _oficial_comecou() -> bool:
 
 def fonte_domingo() -> str:
     """Antes das 17h: boletins do exterior. Depois: o coletor oficial, ou a entrada manual se ela for mais recente."""
+    if FONTE_FORCADA:
+        return FONTE_FORCADA
     manual = SNAPS / DOMINGO[1]
     if not _oficial_comecou() and not (manual.exists() and any(manual.glob("*/uf.csv"))):
         if (SNAPS / EXTERIOR_BU).exists() and any((SNAPS / EXTERIOR_BU).glob("*/uf.csv")):
@@ -260,73 +308,137 @@ Flávio 51% x Lula 49% dos votos válidos (votos válidos = sem brancos e nulos)
 """
 
 
-def aba_ao_vivo():
-    escolha = st.radio("O que mostrar", ["Apuração de domingo (25/10)", "Ensaio: o 1º turno (4/10) de novo"],
-                       horizontal=True, label_visibility="collapsed")
-    ensaio = escolha.startswith("Ensaio")
-    fonte = ENSAIO if ensaio else fonte_domingo()
+def estado_atual() -> tuple[dict | None, Path | None, list[dict]]:
+    """Última projeção, a pasta do snapshot dela e o histórico da noite."""
+    fonte = fonte_domingo()
+    hist = historico(fonte)
+    if not hist:
+        return None, None, []
+    r = hist[-1]
+    return r, SNAPS / fonte / r["snapshot"], hist
 
-    @st.fragment(run_every=None if ensaio else 60)
+
+@st.cache_data(ttl=120)
+def contagem_uf(snap: str) -> pd.DataFrame:
+    """Votos contados por estado, como o TSE informa (uf.csv do snapshot)."""
+    t = pd.read_csv(Path(snap) / "uf.csv")
+    for c in ["comp", "est", "brancos", "nulos", "lula", "flavio", "te", "st", "ts"]:
+        if c not in t:
+            t[c] = 0
+    t["regiao"] = t.uf.map(model.REGIAO)
+    return t
+
+
+@st.cache_data
+def base_t1() -> pd.DataFrame:
+    """1º turno por estado (só Flávio x Lula), para comparar."""
+    b = model.carregar_base()
+    b["margem_1t"] = 100 * (b.flavio - b.lula) / (b.flavio + b.lula)
+    b["comp_1t"] = 100 * b.comp / b.te
+    return b
+
+
+def t1_regiao() -> dict[str, float]:
+    b = base_t1().groupby("regiao")[["flavio", "lula"]].sum()
+    return (100 * (b.flavio - b.lula) / (b.flavio + b.lula)).to_dict()
+
+
+def antes_das_17h(r: dict | None) -> bool:
+    return r is None or r.get("origem") == "bu" or r["pct_apurado"] == 0
+
+
+def cartao(nome: str, apurado: float, f: float, l: float, proj: dict | None, m1t: float | None) -> str:
+    """Cartão de uma região ou de um estado: apuração, contagem, projeção e 1º turno."""
+    v = f + l
+    lider = (proj["margem_proj"] if proj else (m1t or 0))
+    classe = "f" if lider > 0 else "l"
+    if v > 0:
+        pf = 100 * f / v
+        split = (f'<span class="f" style="width:{pf:.2f}%">{br(pf)}%</span>'
+                 f'<span class="l" style="width:{100 - pf:.2f}%">{br(100 - pf)}%</span>')
+        votos = f'<div class="votos"><span>Flávio {br(f, 0)}</span><span>Lula {br(l, 0)}</span></div>'
+    else:
+        split = '<span class="vazio">aguardando a apuração</span>'
+        votos = ""
+    if proj:
+        cls = "f" if proj["margem_proj"] > 0 else "l"
+        pf_ = proj["p_flavio"]
+        proj_html = (f'<div class="proj">Projeção: <b class="{cls}">{vantagem(proj["margem_proj"])}</b><br>'
+                     f'<span class="t1">Chance: <b class="f">Flávio {pct(pf_)}</b> · <b class="l">Lula {pct(1 - pf_)}</b></span></div>')
+    else:
+        proj_html = ""
+    t1 = f'<div class="t1">1º turno: {vantagem(m1t)}</div>' if m1t is not None else ""
+    return (f'<div class="ap-rc {classe}"><div class="topo"><span class="nome">{nome}</span>'
+            f'<span class="apu">{br(apurado, 0)}% apurado</span></div>'
+            f'<div class="mini"><span style="width:{min(apurado, 100):.1f}%"></span></div>'
+            f'<div class="split">{split}</div>{votos}{proj_html}{t1}</div>')
+
+
+def aba_apuracao():
+    @st.fragment(run_every=60)
     def corpo():
-        hist = historico(fonte)
-        if ensaio:
-            st.caption("Ensaio com os dados reais da apuração do 1º turno, como se fosse ao vivo, só Flávio x Lula. "
-                       "Arraste para ver o que o painel mostraria em cada horário. Resultado final real: "
-                       "Flávio 2 pontos à frente de Lula.")
-            if not hist:
-                st.info("O ensaio ainda não foi gerado no servidor.")
-                return
-            # Opções são os próprios horários (texto): nada de função de formatação presa a uma lista que muda.
-            horarios = [h["tse_ht"][:5] for h in hist]
-            padrao = next((h["tse_ht"][:5] for h in hist if h["pct_apurado"] >= 10), horarios[0])
-            escolhido = st.select_slider("Horário (4/10/2026, Brasília)", options=horarios, value=padrao,
-                                         key=f"horario_ensaio_{len(horarios)}")
-            hist = hist[: horarios.index(escolhido) + 1]
-        if not hist or hist[-1]["pct_apurado"] == 0:
+        r, snap, hist = estado_atual()
+        if r is not None and r.get("origem") == "bu":
+            painel_exterior(snap)
+            return
+        if antes_das_17h(r):
             duelo(0.5, 0.5, "—", "—", "aguardando a apuração", "aguardando a apuração")
-            st.info("A divulgação do TSE começa às **17h (Brasília)** de domingo. Esta página se atualiza sozinha a cada "
-                    "minuto. Enquanto isso, veja o **Ensaio** acima ou a aba **Antes da apuração**.")
+            st.info("A divulgação do TSE começa às **17h (Brasília)**. Esta página se atualiza sozinha a cada minuto.")
             with st.expander("Como ler este painel", expanded=True):
                 st.markdown(COMO_LER)
             return
-        r = hist[-1]
-        if r.get("origem") == "bu":
-            painel_exterior(SNAPS / fonte / r["snapshot"])
-            return
-        manchete(r, ensaio)
+        placar_nacional(r, snap)
+        st.html('<div class="ap-sec">Por região</div><p class="ap-secsub">Contagem do TSE (barra), projeção do modelo e '
+                'chance de cada candidato vencer na região. Detalhes por estado na aba <b>Regiões e estados</b>.</p>')
+        grade_regioes(r, snap)
+        st.html('<div class="ap-sec">A noite até agora</div>')
+        graficos(hist)
         with st.expander("Como ler estes números"):
             st.markdown(COMO_LER)
-        graficos(hist)
-        estados(r)
 
     corpo()
 
 
-def manchete(r: dict, ensaio: bool):
+def placar_nacional(r: dict, snap: Path):
     a = r["pct_apurado"]
     hora = (r.get("tse_ht") or "")[:5]
-    st.html(f'<span class="ap-chip">{br(a)}% das urnas apuradas</span>'
-            f'<span class="ap-chip">{"horário simulado" if ensaio else "atualizado às"} {hora}</span>')
-    duelo(r["p_flavio"], r["p_lula"], pct(r["p_flavio"]), pct(r["p_lula"]), "chance de vencer", "chance de vencer")
+    cont = contagem_uf(str(snap))
+    F, L = float(cont.flavio.sum()), float(cont.lula.sum())
+    v = F + L
+    proj_f = 50 + r["margem_mediana"] / 2
+    status = "Decidido" if r["decidido"] else "Ao vivo"
+    st.html(f'<span class="ap-chip">● {status}</span><span class="ap-chip">atualizado às {hora}</span>'
+            + ('<span class="ap-chip">dados digitados à mão</span>' if r.get("origem") == "manual" else ""))
+    st.html(f"""
+<div class="ap-duelo">
+  <div class="ap-card f"><div class="quem">Flávio Bolsonaro (PL)</div><div class="ap-num">{pct(r['p_flavio'])}</div>
+    <div class="sub">chance de vencer</div>
+    <div class="linha"><span>Contagem do TSE</span><b>{br(100 * F / v) if v else '—'}% · {br(F, 0)}</b></div>
+    <div class="linha"><span>Projeção final</span><b>{br(proj_f)}%</b></div></div>
+  <div class="ap-card l"><div class="quem">Lula (PT)</div><div class="ap-num">{pct(r['p_lula'])}</div>
+    <div class="sub">chance de vencer</div>
+    <div class="linha"><span>Contagem do TSE</span><b>{br(100 * L / v) if v else '—'}% · {br(L, 0)}</b></div>
+    <div class="linha"><span>Projeção final</span><b>{br(100 - proj_f)}%</b></div></div>
+</div>
+<div class="ap-barra" role="img" aria-label="Chance: Flávio {pct(r['p_flavio'])}, Lula {pct(r['p_lula'])}">
+  <span class="f" style="width:{100 * r['p_flavio']:.2f}%"></span><span class="l" style="width:{100 * r['p_lula']:.2f}%"></span></div>
+<div class="ap-legbarra"><span>chance de Flávio</span><span>chance de Lula</span></div>
+<div class="ap-prog"><div class="rot"><span>Urnas apuradas</span><b>{br(a)}%</b></div>
+  <div class="trilho"><span style="width:{min(a, 100):.2f}%"></span></div></div>""")
+
     if r.get("origem") == "manual":
         st.info("Os números desta atualização foram digitados à mão a partir do app oficial do TSE, porque o site de "
                 "resultados não respondeu. Podem ter pequenas diferenças.")
     if r["decidido"]:
         st.success(f"**Matematicamente decidido.** A vantagem de {r['lider_atual']} já é maior que o número de "
                    f"eleitores que faltam apurar: nem se todos votassem no outro candidato o resultado mudaria.")
-
     lo, hi = r["margem_80"]
     st.markdown(
         f"#### Resultado projetado: {placar(r['margem_mediana'])}\n"
-        f"Faixa provável (8 em cada 10 simulações): de **{vantagem(lo)}** a **{vantagem(hi)}** pontos. "
+        f"Faixa provável (8 em cada 10 simulações): **{faixa(lo, hi)}** pontos. "
         f"Diferença final estimada: cerca de **{milhoes(r['votos_mediana'])}** de votos para "
         f"{'Flávio' if r['votos_mediana'] > 0 else 'Lula'}."
     )
-    if r.get("margem_atual") is not None:
-        st.markdown(
-            f"Contagem do TSE até agora: **{placar(r['margem_atual'])}**. É o número que aparece na TV, e ainda vai mudar: "
-            f"{'faltam muitas urnas de regiões que votam diferente das já contadas.' if a < 90 else 'faltam poucas urnas.'}"
-        )
     if not r["decidido"] and r["restante_validos_proj"] > 0 and r.get("margem_atual") is not None:
         p = r["atrasado_precisa"]
         txt = (f"**Para virar**, {r['atrasado']} precisaria de **{br(100 * p)}%** dos votos que ainda faltam contar "
@@ -338,6 +450,148 @@ def manchete(r: dict, ensaio: bool):
     elif a >= 70 and lo < 0 < hi:
         st.warning(f"**Disputa apertada.** Mesmo com {br(a, 0)}% apurado, a faixa provável ainda inclui vitória dos dois. "
                    "Nesse caso, não dá para cravar antes do fim.")
+
+
+def grade_regioes(r: dict | None, snap: Path | None, so: list[str] | None = None):
+    m1t = t1_regiao()
+    proj = {g["regiao"]: g for g in (r or {}).get("regioes", [])} if not antes_das_17h(r) else {}
+    if snap is not None and not antes_das_17h(r):
+        c = contagem_uf(str(snap)).groupby("regiao")[["flavio", "lula"]].sum()
+        apur = {g["regiao"]: g["pct_apurado"] for g in r.get("regioes", [])} or \
+            {k: v for k, v in (100 * contagem_uf(str(snap)).groupby("regiao").est.sum()
+                               / contagem_uf(str(snap)).groupby("regiao").te.sum()).items()}
+    else:
+        c, apur = pd.DataFrame(columns=["flavio", "lula"]), {}
+    html = []
+    for g in (so or REG_ORDEM):
+        f = float(c.flavio.get(g, 0)) if len(c) else 0.0
+        l = float(c.lula.get(g, 0)) if len(c) else 0.0
+        html.append(cartao(REG_NOME[g], apur.get(g, 0.0), f, l, proj.get(g), m1t.get(g)))
+    st.html('<div class="ap-grid">' + "".join(html) + "</div>")
+
+
+def aba_regioes():
+    @st.fragment(run_every=60)
+    def corpo():
+        r, snap, hist = estado_atual()
+        cedo = antes_das_17h(r)
+        if cedo:
+            st.info("A apuração por estado começa às **17h (Brasília)**. Por enquanto, os cartões mostram o resultado do "
+                    "1º turno de cada região e estado, só entre Flávio e Lula, para referência.")
+        opcoes = ["Brasil"] + [REG_NOME[g] for g in REG_ORDEM if g != "EX"]
+        escolha = st.segmented_control("Região", opcoes, default="Brasil", key="regiao_sel") or "Brasil"
+        cod = {v: k for k, v in REG_NOME.items()}.get(escolha)
+
+        st.html(f'<div class="ap-sec">{"Regiões" if escolha == "Brasil" else escolha}</div>')
+        grade_regioes(r, snap, None if escolha == "Brasil" else [cod])
+
+        b = base_t1()
+        ufs = b[b.uf != "zz"] if escolha == "Brasil" else b[b.regiao == cod]
+        proj = {} if cedo else {x["uf"]: x for x in r["uf"]}
+        cont = contagem_uf(str(snap)).set_index("uf") if (snap is not None and not cedo) else None
+
+        # Mapa
+        if not cedo:
+            modo = st.segmented_control("Colorir o mapa por", ["Projeção final", "Contagem do TSE"],
+                                        default="Projeção final", key="mapa_modo") or "Projeção final"
+            t = pd.DataFrame(r["uf"])
+            t = t[t.uf.isin(ufs.uf)]
+            t["apurado"] = t.pct_apurado
+            t["margem"] = t.margem_proj if modo == "Projeção final" else t.margem_atual
+            mapa(t[t.margem.notna()], f"{escolha}: {'projeção final' if modo == 'Projeção final' else 'contagem do TSE'} por estado",
+                 rot="Projeção" if modo == "Projeção final" else "Contagem")
+        else:
+            t = ufs.rename(columns={"margem_1t": "margem"})[["uf", "margem"]]
+            mapa(t, f"{escolha}: resultado do 1º turno por estado (só Flávio x Lula)", rot="1º turno")
+
+        # Cartões dos estados (do mais Flávio ao mais Lula na projeção, ou no 1º turno)
+        ordem = ufs.assign(chave=[(proj[u]["margem_proj"] if u in proj else m) for u, m in zip(ufs.uf, ufs.margem_1t)]) \
+            .sort_values("chave", ascending=False)
+        html = []
+        for _, x in ordem.iterrows():
+            f = float(cont.at[x.uf, "flavio"]) if cont is not None and x.uf in cont.index else 0.0
+            l = float(cont.at[x.uf, "lula"]) if cont is not None and x.uf in cont.index else 0.0
+            p = proj.get(x.uf)
+            html.append(cartao(nomes_uf()[x.uf], p["pct_apurado"] if p else 0.0, f, l, p, x.margem_1t))
+        st.html(f'<div class="ap-sec">{"Todos os estados" if escolha == "Brasil" else "Estados: " + escolha}</div>'
+                '<p class="ap-secsub">Ordenados de onde Flávio está mais forte para onde Lula está mais forte.</p>'
+                f'<div class="ap-grid uf">{"".join(html)}</div>')
+
+        # Detalhe de um estado
+        nomes = {nomes_uf()[u]: u for u in ordem.uf}
+        sel = st.selectbox("Ver um estado em detalhe", ["—"] + sorted(nomes), key="uf_detalhe")
+        if sel != "—":
+            detalhe_estado(nomes[sel], r, snap, hist, cedo)
+
+    corpo()
+
+
+def detalhe_estado(uf: str, r: dict | None, snap: Path | None, hist: list[dict], cedo: bool):
+    b = base_t1().set_index("uf").loc[uf]
+    nome, reg = nomes_uf()[uf], REG_NOME[model.REGIAO[uf]]
+    p = None if cedo else next((x for x in r["uf"] if x["uf"] == uf), None)
+    c = None if cedo else contagem_uf(str(snap)).set_index("uf").loc[uf]
+    F, L = (float(c.flavio), float(c.lula)) if c is not None else (0.0, 0.0)
+    v = F + L
+    kpis = []
+    if p:
+        kpis += [("Apurado", f"{br(p['pct_apurado'])}%"),
+                 ("Projeção", vantagem(p["margem_proj"])),
+                 ("Faixa provável", faixa(p["p10"], p["p90"])),
+                 ("Chance de Flávio", pct(p["p_flavio"])), ("Chance de Lula", pct(1 - p["p_flavio"]))]
+    if c is not None and c.est and c.comp:
+        kpis.append(("Comparecimento até agora", f"{br(100 * c.comp / c.est)}%"))
+        if c.comp:
+            kpis.append(("Brancos e nulos", f"{br(100 * (c.brancos + c.nulos) / c.comp)}%"))
+    kpis += [("Comparecimento no 1º turno", f"{br(b.comp_1t)}%"), ("1º turno (só os dois)", vantagem(b.margem_1t))]
+    st.html(f'<div class="ap-det"><h3>{nome}</h3><span class="ap-secsub">{reg}</span>'
+            + (f'<div class="ap-duelo" style="margin-top:.6rem"><div class="ap-card f"><div class="quem">Flávio</div>'
+               f'<div class="ap-num" style="font-size:2rem">{br(F, 0)}</div><div class="sub">votos contados · {br(100 * F / v)}%</div></div>'
+               f'<div class="ap-card l"><div class="quem">Lula</div><div class="ap-num" style="font-size:2rem">{br(L, 0)}</div>'
+               f'<div class="sub">votos contados · {br(100 * L / v)}%</div></div></div>' if v else "")
+            + '<div class="ap-kpis">' + "".join(f'<div class="ap-kpi"><div class="k">{k}</div><div class="v">{val}</div></div>'
+                                                for k, val in kpis) + "</div></div>")
+
+    # 1º turno x contagem x projeção, em barras de 100%
+    linhas = [("1º turno", 50 + b.margem_1t / 2)]
+    if v:
+        linhas.append(("Contagem agora", 100 * F / v))
+    if p:
+        linhas.append(("Projeção final", 50 + p["margem_proj"] / 2))
+    linhas = linhas[::-1]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(y=[x[0] for x in linhas], x=[x[1] for x in linhas], orientation="h", name="Flávio",
+                         marker_color=FLAVIO, text=[f"Flávio {br(x[1])}%" for x in linhas], textposition="inside",
+                         insidetextanchor="start", hovertemplate="%{y}: Flávio %{x:.1f}%<extra></extra>"))
+    fig.add_trace(go.Bar(y=[x[0] for x in linhas], x=[100 - x[1] for x in linhas], orientation="h", name="Lula",
+                         marker_color=LULA, text=[f"Lula {br(100 - x[1])}%" for x in linhas], textposition="inside",
+                         insidetextanchor="end", hovertemplate="%{y}: Lula %{x:.1f}%<extra></extra>"))
+    fig.add_vline(x=50, line_color="white", line_width=2)
+    layout(fig, h=90 + 48 * len(linhas), barmode="stack", showlegend=False, hovermode="closest",
+           title=f"{nome}: votos entre os dois", xaxis=dict(range=[0, 100], ticksuffix="%", showgrid=False),
+           bargap=0.35)
+    fig.update_traces(marker_line_width=0, textfont=dict(color="white", size=13))
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+
+    # Evolução no estado ao longo da noite
+    if p and len(hist) > 1:
+        ev = [{"apurado": h["pct_apurado"], **x} for h in hist for x in h.get("uf", []) if x["uf"] == uf]
+        ev = pd.DataFrame(ev)
+        if len(ev) > 1:
+            f2 = go.Figure()
+            f2.add_trace(go.Scatter(x=pd.concat([ev.apurado, ev.apurado[::-1]]), y=pd.concat([ev.p90, ev.p10[::-1]]),
+                                    fill="toself", fillcolor="rgba(107,107,102,0.16)", line=dict(width=0),
+                                    hoverinfo="skip", name="faixa provável"))
+            f2.add_trace(go.Scatter(x=ev.apurado, y=ev.margem_proj, mode="lines", line=dict(color=TINTA, width=2.5),
+                                    name="projeção", customdata=[vantagem(m) for m in ev.margem_proj],
+                                    hovertemplate="projeção: %{customdata}<extra></extra>"))
+            f2.add_trace(go.Scatter(x=ev.apurado, y=ev.margem_atual, mode="lines", line=dict(color=NEUTRO, width=2, dash="dot"),
+                                    name="contagem do TSE", customdata=[vantagem(m) for m in ev.margem_atual],
+                                    hovertemplate="contagem: %{customdata}<extra></extra>"))
+            f2.add_hline(y=0, line_color=NEUTRO, line_width=1)
+            layout(f2, h=300, title=f"{nome} ao longo da noite (vantagem em pontos)",
+                   xaxis_title="% das urnas apuradas no país", legend=dict(orientation="h", y=-0.3))
+            st.plotly_chart(f2, width="stretch", config={"displayModeBar": False})
 
 
 def graficos(hist: list[dict]):
@@ -381,31 +635,6 @@ def graficos(hist: list[dict]):
     c2.plotly_chart(f2, width="stretch")
     c2.caption("Pontilhada: a contagem do TSE, que oscila muito no começo. Cheia: a projeção do resultado final. "
                "Faixa cinza: onde o resultado deve cair.")
-
-
-def estados(r: dict):
-    st.subheader("Estado por estado")
-    t = pd.DataFrame(r["uf"])
-    mapa(t.rename(columns={"margem_proj": "margem", "pct_apurado": "apurado"}),
-         "Quem deve vencer em cada estado (projeção)")
-    t["Estado"] = t.uf.map(nomes_uf())
-    t["Apurado"] = t.pct_apurado
-    t["Na contagem"] = t.margem_atual.map(vantagem)
-    t["Projeção"] = t.margem_proj.map(vantagem)
-    t["Faixa provável"] = [f"{vantagem(a)} a {vantagem(b)}" for a, b in zip(t.p10, t.p90)]
-    t["Chance de Flávio no estado"] = t.p_flavio
-    with st.expander("Ver a tabela de todos os estados"):
-        st.dataframe(
-            t.sort_values("margem_proj", ascending=False)[
-                ["Estado", "Apurado", "Na contagem", "Projeção", "Faixa provável", "Chance de Flávio no estado"]],
-            hide_index=True, width="stretch", height=420,
-            column_config={
-                "Apurado": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.0f%%"),
-                "Chance de Flávio no estado": st.column_config.ProgressColumn(min_value=0, max_value=1, format="percent"),
-            },
-        )
-        st.caption("Vantagem em pontos percentuais dos votos válidos. A chance de Lula no estado é 100% menos a de Flávio. "
-                   "O exterior conta como um estado a mais.")
 
 
 # ================================================================ Exterior (antes das 17h)
@@ -504,53 +733,6 @@ def painel_exterior(snap: Path):
 
 # ================================================================ Como funciona
 
-ORDENS = {
-    "real": ("Ordem real", "As zonas eleitorais entram na ordem em que o TSE de fato terminou de contá-las naquela noite. "
-             "É o teste mais parecido com domingo."),
-    "aleatoria": ("Ordem sorteada (5 sorteios)", "As urnas chegam em ordem aleatória. É o caso fácil: o que chega é uma "
-                  "amostra parecida com o todo, como numa pesquisa."),
-    "porte_desc": ("Cidades grandes primeiro", "Capitais e metrópoles chegam antes do interior."),
-    "porte_asc": ("Cidades pequenas primeiro", "O interior pequeno chega antes, parecido com o começo de uma noite real."),
-    "pior_F_primeiro": ("Redutos da direita primeiro (teste extremo)", "Todas as zonas mais favoráveis a {dir} chegam antes "
-                        "de qualquer outra. Não acontece na vida real: serve para ver até onde o modelo aguenta."),
-    "pior_L_primeiro": ("Redutos de Lula primeiro (teste extremo)", "Todas as zonas mais favoráveis a Lula chegam antes de "
-                        "qualquer outra. Também não acontece na vida real."),
-}
-CASOS = {
-    "t2_2022": {"titulo": "2º turno de 2022: Lula x Bolsonaro", "dir": "Bolsonaro",
-                "ponto": "Demos ao modelo um ponto de partida **errado de propósito**: a mesma suposição que usamos "
-                         "para 2026 (46% dos eleitores dos outros candidatos para a direita, 32% para Lula). Aplicada a "
-                         "2022, ela dizia **Lula +{prior}**; o resultado real foi **Lula +{final}**."},
-    "t1_2026": {"titulo": "1º turno de 2026: Flávio x Lula", "dir": "Flávio",
-                "ponto": "O ponto de partida foi o resultado do 2º turno de 2022 em cada cidade, que apontava "
-                         "**{lider_prior} +{prior}**. O resultado real foi **Flávio +{final}**: o ponto de partida "
-                         "apontava o vencedor errado, e a ordem de chegada foi muito torta (o Sul chegou primeiro)."},
-}
-
-
-@st.cache_data
-def backtest_df() -> pd.DataFrame | None:
-    f = ROOT / "data" / "backtest" / "resultados.csv"
-    if not f.exists():
-        return None
-    d = pd.read_csv(f)
-    d["grupo"] = np.where(d.ordem.str.startswith("aleatoria"), "aleatoria", d.ordem)
-    d["tipo"] = np.where(d.ordem.str.startswith("pior"), "extrema", "realista")
-    return d
-
-
-@st.cache_data
-def prior_backtest() -> dict[str, float]:
-    """Margem nacional (direita − Lula) que o ponto de partida de cada teste previa."""
-    import backtest
-    out = {}
-    for nome, f in (("t2_2022", backtest.caso_t2_2022), ("t1_2026", backtest.caso_t1_2026)):
-        u = f()
-        fp = (u.p0 * u.V0).sum() / u.V0.sum()
-        out[nome] = 100 * (2 * fp - 1)
-    return out
-
-
 def aba_como_funciona():
     st.markdown("""
 ### Em uma frase
@@ -566,20 +748,17 @@ as cidades que ainda faltam.
 4. **Aprender o padrão.** As surpresas se parecem dentro de um mesmo estado, de uma mesma região, entre cidades do mesmo
    tamanho? Cada cidade que falta recebe a surpresa típica das cidades parecidas com ela que já foram contadas.
 5. **Simular.** O painel sorteia 2.000 resultados possíveis para as urnas que faltam, com a margem de incerteza que
-   cada parte tem, e conta em quantos cada candidato vence. Daí sai a **chance de vitória**.
+   cada parte tem, e conta em quantos cada candidato vence. Daí sai a **chance de vitória**, no país, em cada região
+   e em cada estado.
 6. **Ficar mais seguro com o tempo.** Quanto mais urnas contadas, menos sobra para adivinhar e mais estreita fica a
    faixa provável. No comecinho da noite o modelo é cauteloso de propósito.
-""")
-    d = backtest_df()
-    if d is not None:
-        testes(d)
-    st.markdown("""
+
+Antes de domingo, o modelo foi testado reapresentando as apurações do 2º turno de 2022 e do 1º turno de 2026 como se
+fossem ao vivo.
+
 ### Limites (leia antes de apostar alguma coisa)
 - **Não é pesquisa nem resultado oficial.** Só o TSE declara o resultado.
-- **Pode errar.** No teste extremo em que todas as urnas de Lula chegavam antes, o modelo chegou a apontar o favorito
-  errado com até 60% das urnas apuradas. Na vida real as urnas não chegam desse jeito, mas isso mostra que ele não é infalível.
-- **Só duas eleições de teste.** Os testes acima são bons sinais, não garantia.
-- **Antes das 17h**, a aba *Antes da apuração* é só um exercício com suposições, não uma previsão.
+- **Pode errar.** A chance de vitória é uma estimativa; com 80%, o favorito ainda perde 1 em cada 5 vezes.
 - **Se o site do TSE falhar**, os números podem ser digitados à mão a partir do app oficial, e o painel avisa quando isso acontecer.
 
 ### Glossário
@@ -588,134 +767,11 @@ as cidades que ainda faltam.
 - **Chance de vitória**: em quantas de 100 repetições da mesma situação o candidato venceria.
 - **Faixa provável**: onde o resultado final cai em 8 de cada 10 simulações.
 - **Apurado**: parte do eleitorado cujas urnas o TSE já contou.
-- **Zona eleitoral**: um conjunto de seções de votação de uma cidade. Cidades grandes têm várias zonas.
+- **Projeção final**: a estimativa do modelo para o resultado quando todas as urnas forem contadas.
 
 *Projeto pessoal, sem vínculo com partidos, institutos ou com o TSE. Dados oficiais do TSE
 (resultados.tse.jus.br e dadosabertos.tse.jus.br).*
 """)
-
-
-def testes(d: pd.DataFrame):
-    st.markdown("""
-### Já testamos com eleições de verdade
-Pegamos apurações passadas e fizemos o modelo "assistir" de novo, como se fosse ao vivo, sem saber o final.
-Em cada teste, as urnas chegam em **seis jeitos diferentes**, do mais realista ao mais maldoso, e anotamos o que o
-modelo dizia com 5%, 10%, 20%… até 95% das urnas.
-""")
-    caso = st.radio("Escolha o teste", list(CASOS), format_func=lambda c: CASOS[c]["titulo"], horizontal=True)
-    info = CASOS[caso]
-    g = d[d.caso == caso]
-    final = g.final.iloc[0]
-    prior = prior_backtest()[caso]
-    st.markdown(info["ponto"].format(prior=br(abs(prior)), final=br(abs(final)),
-                                     lider_prior="Lula" if prior < 0 else info["dir"]))
-    dirn = info["dir"]
-    vant = lambda m, d_=1: vantagem(m, d_, dirn)  # noqa: E731
-
-    # 1) O filme da noite, na ordem real
-    rr = g[g.ordem == "real"].sort_values("pct")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=pd.concat([rr.pct, rr.pct[::-1]]), y=pd.concat([rr.hi80, rr.lo80[::-1]]), fill="toself",
-                             fillcolor="rgba(107,107,102,0.16)", line=dict(width=0), hoverinfo="skip", name="faixa provável"))
-    fig.add_trace(go.Scatter(x=rr.pct, y=rr.ingenua, mode="lines+markers", line=dict(color=NEUTRO, width=2, dash="dot"),
-                             name="contagem do TSE naquela hora", customdata=[vant(v) for v in rr.ingenua],
-                             hovertemplate="contagem: %{customdata}<extra></extra>"))
-    fig.add_trace(go.Scatter(x=rr.pct, y=rr.proj, mode="lines+markers", line=dict(color=TINTA, width=3),
-                             name="projeção do modelo", customdata=[vant(v) for v in rr.proj],
-                             hovertemplate="modelo: %{customdata}<extra></extra>"))
-    fig.add_hline(y=final, line_width=2, line_dash="dash", line_color=FLAVIO if final > 0 else LULA,
-                  annotation_text=f"resultado final: {vant(final)}", annotation_position="top right")
-    fig.add_hline(y=0, line_width=1, line_color="#d8d6d0")
-    layout(fig, h=380, title="O filme da noite (ordem real de chegada)", xaxis_title="% das urnas apuradas",
-           yaxis_title=f"vantagem de {dirn} (pontos)", legend=dict(orientation="h", y=-0.25))
-    st.plotly_chart(fig, width="stretch")
-    r10 = rr[rr.pct == 10].iloc[0]
-    st.caption(f"Com 10% das urnas, a contagem dizia **{vant(r10.ingenua)}**; o modelo dizia **{vant(r10.proj)}**. "
-               f"A linha tracejada é onde a noite terminou. Quanto mais perto dela, melhor.")
-
-    # 2) Erro do modelo x erro da contagem
-    real_ = g[g.tipo == "realista"]
-    e = real_.groupby("pct").agg(modelo=("erro", lambda x: x.abs().mean()),
-                                 contagem=("erro_ingenuo", lambda x: x.abs().mean())).reset_index()
-    e = e[e.pct.isin([10, 30, 50, 70, 90])]
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=[f"{p}%" for p in e.pct], y=e.contagem, name="olhar só a contagem do TSE", marker_color="#b9b7b0",
-                         text=[br(v) for v in e.contagem], textposition="outside", hovertemplate="%{y:.1f} pontos<extra></extra>"))
-    fig.add_trace(go.Bar(x=[f"{p}%" for p in e.pct], y=e.modelo, name="projeção do modelo", marker_color=TINTA,
-                         text=[br(v) for v in e.modelo], textposition="outside", hovertemplate="%{y:.1f} pontos<extra></extra>"))
-    layout(fig, h=340, title="Quanto cada um errou o resultado final (média, em pontos)", barmode="group", bargap=0.3,
-           xaxis_title="% das urnas apuradas", yaxis_title="erro (pontos)", legend=dict(orientation="h", y=-0.25),
-           hovermode="closest")
-    fig.update_traces(marker_line_width=0)
-    st.plotly_chart(fig, width="stretch")
-    st.caption("Média das ordens realistas (real, sorteadas, por tamanho de cidade). Barra menor = erro menor.")
-
-    # 3) Cada jeito de chegada, destrinchado
-    st.markdown("#### Cada jeito de as urnas chegarem")
-    grupos = ["real", "aleatoria", "porte_asc", "porte_desc", "pior_F_primeiro", "pior_L_primeiro"]
-    cols = st.columns(2)
-    for i, gname in enumerate(grupos):
-        gg = g[g.grupo == gname]
-        nome, desc = ORDENS[gname]
-        agg = gg.groupby("pct").agg(proj=("proj", "median"), lo=("lo80", "min"), hi=("hi80", "max"),
-                                    pv=("p_vencedor", "min"), ing=("ingenua", "median")).reset_index()
-        firme = next((p for p in agg.pct if (agg[agg.pct >= p].pv >= 0.95).all()), None)
-        errado = agg[agg.pv <= 0.05].pct.tolist()
-        e50 = (gg[gg.pct == 50].erro.abs().mean())
-        with cols[i % 2]:
-            classe = "real" if gname == "real" else ("extrema" if gname.startswith("pior") else "")
-            veredito = (f'<span class="ap-ok">Acertou o vencedor com segurança (95%+) a partir de {firme}% apurado.</span>'
-                        if firme else '<span class="ap-ruim">Não chegou a 95% de segurança no vencedor certo.</span>')
-            if errado:
-                veredito += (f' <span class="ap-ruim">Ficou confiante no lado errado até {max(errado)}% apurado.</span>')
-            st.html(f'<div class="ap-ordem {classe}"><b>{nome}</b><br><span style="color:#3d3d3a">{desc.format(dir=dirn)}</span>'
-                    f'<br>{veredito} Erro com metade das urnas: <b>{br(e50, 1)} ponto{"s" if e50 >= 2 else ""}</b>.</div>')
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=pd.concat([agg.pct, agg.pct[::-1]]), y=pd.concat([agg.hi, agg.lo[::-1]]),
-                                     fill="toself", fillcolor="rgba(107,107,102,0.16)", line=dict(width=0), hoverinfo="skip"))
-            fig.add_trace(go.Scatter(x=agg.pct, y=agg.ing, mode="lines", line=dict(color=NEUTRO, width=1.5, dash="dot"),
-                                     customdata=[vant(v) for v in agg.ing], hovertemplate="contagem: %{customdata}<extra></extra>"))
-            fig.add_trace(go.Scatter(x=agg.pct, y=agg.proj, mode="lines",
-                                     line=dict(color=LARANJA if classe == "extrema" else TINTA, width=2.5),
-                                     customdata=[vant(v) for v in agg.proj], hovertemplate="modelo: %{customdata}<extra></extra>"))
-            fig.add_hline(y=final, line_width=1.5, line_dash="dash", line_color=FLAVIO if final > 0 else LULA)
-            fig.add_hline(y=0, line_width=1, line_color="#d8d6d0")
-            vals = pd.concat([agg.lo, agg.hi, agg[agg.pct >= 20].ing, pd.Series([final, 0.0])])
-            layout(fig, h=220, showlegend=False, xaxis=dict(ticksuffix="%"),
-                   yaxis=dict(range=[vals.min() - 1, vals.max() + 1]))
-            fig.update_layout(margin=dict(l=10, r=10, t=10, b=10))
-            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
-    st.caption("Em cada gráfico: linha cheia = projeção do modelo; pontilhada = contagem do TSE; faixa cinza = faixa provável; "
-               "tracejada colorida = resultado final.")
-
-    # 4) Chance que o modelo deu ao vencedor real
-    piv = (g.groupby(["grupo", "pct"]).p_vencedor.min().unstack("pct").reindex(grupos))
-    vencedor = dirn if final > 0 else "Lula"
-    fig = go.Figure(go.Heatmap(
-        z=100 * piv.values, x=[f"{c}%" for c in piv.columns], y=[ORDENS[k][0].split(" (")[0] for k in piv.index],
-        zmin=0, zmax=100, colorscale=[[0, "#c98a3a"], [0.5, "#f0efec"], [1, "#0c7a0c"]],
-        text=[[br(v, 0) for v in row] for row in 100 * piv.values], texttemplate="%{text}",
-        hovertemplate="%{y}<br>%{x} apurado: chance dada ao vencedor real = %{z:.0f}%<extra></extra>",
-        colorbar=dict(title="chance (%)", thickness=10), xgap=2, ygap=2))
-    layout(fig, h=330, title=f"Chance que o modelo dava a {vencedor} (o vencedor real) a cada momento",
-           hovermode="closest", xaxis_title="% das urnas apuradas")
-    fig.update_yaxes(autorange="reversed")
-    st.plotly_chart(fig, width="stretch")
-    st.caption("Verde = o modelo apostava certo; laranja = apostava no perdedor; cinza claro = em dúvida (perto de 50%). "
-               "Nas ordens sorteadas, mostramos o pior dos 5 sorteios.")
-
-    # 5) A faixa provável acerta?
-    cob = g[g.tipo == "realista"].groupby("pct").cob80.mean().reset_index()
-    fig = go.Figure(go.Bar(x=[f"{p}%" for p in cob.pct], y=100 * cob.cob80, marker_color="#8f8d86",
-                           text=[br(100 * v, 0) + "%" for v in cob.cob80], textposition="outside",
-                           hovertemplate="%{y:.0f}% das vezes<extra></extra>"))
-    fig.add_hline(y=80, line_dash="dash", line_color=TINTA, annotation_text="ideal: 80%", annotation_position="top left")
-    layout(fig, h=280, title="O resultado final ficou dentro da faixa provável?", yaxis=dict(range=[0, 115], ticksuffix="%"),
-           xaxis_title="% das urnas apuradas", hovermode="closest", showlegend=False)
-    fig.update_traces(marker_line_width=0)
-    st.plotly_chart(fig, width="stretch")
-    st.caption("A faixa provável promete acertar 8 em cada 10 vezes. Bem acima de 80%, o modelo foi cauteloso demais; "
-               "bem abaixo, confiante demais. Ordens realistas.")
 
 
 # ================================================================ Antes =====
@@ -857,7 +913,7 @@ ver os detalhes ou mexa você mesmo nas suposições.
     duelo(r["p_flavio"], r["p_lula"], f"{br(100 * r['p_flavio'], 0)} em 100", f"{br(100 * r['p_lula'], 0)} em 100",
           "simulações em que vence", "simulações em que vence")
     st.markdown(f"#### Resultado mais provável: {placar(r['margem_mediana'])}\n"
-                f"Faixa provável: de **{vantagem(r['margem_80'][0])}** a **{vantagem(r['margem_80'][1])}** pontos.")
+                f"Faixa provável: **{faixa(r['margem_80'][0], r['margem_80'][1])}** pontos.")
 
     m = sim["margem"]
     bins = np.linspace(np.floor(m.min()), np.ceil(m.max()), 61)
@@ -932,14 +988,16 @@ st.html("""
   dados públicos do TSE: não é pesquisa e não substitui o resultado oficial.</p>
 </div>""")
 
-nomes = ["Ao vivo", "Como funciona", "Antes da apuração"] + (["Administração"] if ADMIN else [])
+nomes = ["Apuração", "Regiões e estados", "Como funciona", "Cenários pré-apuração"] + (["Administração"] if ADMIN else [])
 tabs = st.tabs(nomes)
 with tabs[0]:
-    aba_ao_vivo()
+    aba_apuracao()
 with tabs[1]:
-    aba_como_funciona()
+    aba_regioes()
 with tabs[2]:
+    aba_como_funciona()
+with tabs[3]:
     aba_antes()
 if ADMIN:
-    with tabs[3]:
+    with tabs[4]:
         aba_admin()

@@ -199,3 +199,17 @@ Lula, Flávio e brancos (nulos diferem em 123 votos de candidato anulado depois,
 Antes das 17h o painel mostra a tela "Votos do exterior, urna por urna": o placar cru, a comparação com o 1º turno
 nas mesmas cidades (as primeiras urnas são do Japão, reduto de Flávio) e nenhuma chance nacional. Quando o total
 oficial começa, o coletor de boletins sai sozinho e o painel passa para a apuração oficial.
+
+## Painel de acompanhamento (versão do dia da eleição)
+
+Abas: **Apuração** (placar nacional com chance, contagem do TSE e projeção de cada candidato; urnas apuradas;
+cartões das 5 regiões e do exterior; gráficos da noite), **Regiões e estados** (filtro por região, mapa colorido pela
+projeção ou pela contagem, cartão de cada estado e detalhe de um estado: votos, comparecimento, 1º turno x contagem x
+projeção e evolução ao longo da noite), **Como funciona** e **Cenários pré-apuração**. O ensaio e os testes saíram da tela;
+o código deles continua em `src/backtest.py`.
+
+O modelo não mudou. `live.estimar` passou a devolver também `regioes`: as mesmas simulações agrupadas por região
+(a chance de uma região não é a soma das chances dos estados, porque as incertezas deles andam juntas).
+Conferido: chance nacional e projeções por estado idênticas às de antes.
+
+`PAINEL_FONTE=<pasta em data/snapshots>` força uma fonte de dados, só para testes locais.

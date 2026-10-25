@@ -199,25 +199,34 @@ def estimar(u: pd.DataFrame, h: Hiper = Hiper()) -> dict:
     marg = 100 * (F_fin - L_fin) / (F_fin + L_fin)
     votos = F_fin - L_fin
 
-    # por UF
-    uf_rows = []
-    iuf_f = iu[falta]
-    for k, x in enumerate(ufs):
-        sel = iu == k
-        if not sel.any():
-            continue
-        mk = iuf_f == k
-        Fu = Fc[sel].sum() + (R[:, mk] * pf[:, mk]).sum(1)
-        Lu = Lc[sel].sum() + (R[:, mk] * (1 - pf[:, mk])).sum(1)
-        mu = 100 * (Fu - Lu) / (Fu + Lu)
-        cont = Fc[sel].sum() + Lc[sel].sum()
-        apt = u.aptos.to_numpy(float)[sel]
-        uf_rows.append({
-            "uf": x, "pct_apurado": 100 * (apt * frac[sel]).sum() / apt.sum(),
-            "margem_atual": 100 * (Fc[sel].sum() - Lc[sel].sum()) / cont if cont else np.nan,
-            "margem_proj": float(np.median(mu)), "p10": float(np.percentile(mu, 10)),
-            "p90": float(np.percentile(mu, 90)), "p_flavio": float((mu > 0).mean()),
-        })
+    # Por estado e por região: as mesmas simulações, só agrupadas de outro jeito (a incerteza
+    # dos estados de uma região anda junta, por isso a região não é a soma das chances dos estados).
+    aptos_u = u.aptos.to_numpy(float)
+
+    def agrupar(idx: np.ndarray, nomes: list, chave: str) -> list[dict]:
+        rows = []
+        idx_f = idx[falta]
+        for k, x in enumerate(nomes):
+            sel = idx == k
+            if not sel.any():
+                continue
+            mk = idx_f == k
+            Fu = Fc[sel].sum() + (R[:, mk] * pf[:, mk]).sum(1)
+            Lu = Lc[sel].sum() + (R[:, mk] * (1 - pf[:, mk])).sum(1)
+            mu = 100 * (Fu - Lu) / (Fu + Lu)
+            cont = Fc[sel].sum() + Lc[sel].sum()
+            apt = aptos_u[sel]
+            rows.append({
+                chave: x, "pct_apurado": 100 * (apt * frac[sel]).sum() / apt.sum(),
+                "margem_atual": 100 * (Fc[sel].sum() - Lc[sel].sum()) / cont if cont else np.nan,
+                "flavio_contado": float(Fc[sel].sum()), "lula_contado": float(Lc[sel].sum()),
+                "margem_proj": float(np.median(mu)), "p10": float(np.percentile(mu, 10)),
+                "p90": float(np.percentile(mu, 90)), "p_flavio": float((mu > 0).mean()),
+            })
+        return rows
+
+    uf_rows = agrupar(iu, ufs, "uf")
+    reg_rows = agrupar(ir, REGIOES, "regiao")
 
     aptos = u.aptos.to_numpy(float)
     restante_aptos = float((aptos * (1 - frac)).sum())
@@ -236,7 +245,7 @@ def estimar(u: pd.DataFrame, h: Hiper = Hiper()) -> dict:
         "decidido": bool(abs(lead) > restante_aptos), "lider_atual": "Flávio" if lead > 0 else "Lula",
         "atrasado": atr, "atrasado_precisa": precisa,
         "sigma_e": sig_e, "sd_resto": float(sd_resto), "swing_nacional_logit": float(mean[0]), "inclinacao_lean": float(mean[1]),
-        "uf": uf_rows,
+        "uf": uf_rows, "regioes": reg_rows,
     }
 
 
