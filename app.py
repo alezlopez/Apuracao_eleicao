@@ -112,6 +112,12 @@ st.html("""
   .ap-secsub { color: var(--neutro); margin: 0 0 .4rem; font-size: .95rem; }
   .ap-det { border: 1px solid var(--linha); border-radius: 12px; padding: 1rem 1.1rem; background: var(--fundo2); }
   .ap-det h3 { margin: 0 0 .2rem; }
+  .ap-porque { border: 1px solid var(--linha); border-radius: 12px; padding: .9rem 1.1rem; background: var(--fundo2);
+               margin: .6rem 0 1rem; font-family: 'Source Sans 3', sans-serif; color: #3d3d3a; }
+  .ap-porque h4 { font-family: 'Archivo', sans-serif; font-weight: 800; font-size: 1.15rem; margin: 0 0 .5rem; color: var(--tinta); }
+  .ap-porque ol { margin: 0; padding-left: 1.2rem; } .ap-porque li { margin: 0 0 .55rem; line-height: 1.45; }
+  .ap-porque .f { color: var(--flavio); font-weight: 700; } .ap-porque .l { color: var(--lula); font-weight: 700; }
+  .ap-porque .regs { display: block; font-size: .88rem; color: var(--neutro); margin-top: .2rem; }
   .ap-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: .6rem; margin-top: .6rem; }
   .ap-kpi { background: #fff; border: 1px solid var(--linha); border-radius: 10px; padding: .55rem .75rem; }
   .ap-kpi .k { font-size: .75rem; color: var(--neutro); text-transform: uppercase; letter-spacing: .05em; }
@@ -484,6 +490,7 @@ def placar_nacional(r: dict, snap: Path):
         f"Diferença final estimada: cerca de **{milhoes(r['votos_mediana'])}** de votos para "
         f"{'Flávio' if r['votos_mediana'] > 0 else 'Lula'}."
     )
+    explicacao(r)
     if not r["decidido"] and r["restante_validos_proj"] > 0 and r.get("margem_atual") is not None:
         p = r["atrasado_precisa"]
         txt = (f"**Para virar**, {r['atrasado']} precisaria de **{br(100 * p)}%** dos votos que ainda faltam contar "
@@ -495,6 +502,83 @@ def placar_nacional(r: dict, snap: Path):
     elif a >= 70 and lo < 0 < hi:
         st.warning(f"**Disputa apertada.** Mesmo com {br(a, 0)}% apurado, a faixa provável ainda inclui vitória dos dois. "
                    "Nesse caso, não dá para cravar antes do fim.")
+
+
+def quem(v: float, txt: str) -> str:
+    """Texto pintado com a cor de quem é favorecido (v > 0: Flávio)."""
+    return f'<span class="{"f" if v > 0 else "l"}">{txt}</span>'
+
+
+def explicacao(r: dict):
+    """'Por que essa projeção': o raciocínio do modelo em cinco passos, escrito com os números do momento."""
+    regs = {g["regiao"]: g for g in r.get("regioes", []) if "saldo_faltam" in g}
+    if not regs or r.get("swing_pp") is None:
+        return
+    ordem = [k for k in REG_ORDEM if k in regs]
+    agora = float(r["votos_atual"])
+    efeito = sum(regs[k]["saldo_faltam"] for k in ordem)
+    final = agora + efeito
+    lo, hi = r["margem_80"]
+    itens = []
+
+    # 1. Contagem
+    lider = "Flávio" if agora > 0 else "Lula"
+    itens.append(f"<b>A contagem de agora.</b> Com {br(r['pct_apurado'], 0)}% do eleitorado apurado, "
+                 f"{quem(agora, lider)} está na frente por {quem(agora, milhoes(agora))} de votos. "
+                 f"Mas quem já foi contado <b>não é uma amostra do país</b>: algumas regiões andam mais rápido que outras.")
+
+    # 2. Comparação de cada cidade com ela mesma
+    sw = float(r["swing_pp"])
+    favor = "Flávio" if sw > 0 else "Lula"
+    porreg = " · ".join(f"{REG_NOME[k]}: {quem(regs[k]['swing_pp'], vantagem(regs[k]['swing_pp']))}"
+                        for k in ordem if regs[k].get("swing_pp") is not None)
+    itens.append(f"<b>Cada cidade comparada com ela mesma.</b> Para cada cidade, o modelo já sabia o que esperar "
+                 f"(o resultado dela no 1º turno, com a transferência de votos das pesquisas). Nas "
+                 f"{br(r.get('cidades_apuradas', 0), 0)} cidades com votos contados, o resultado está, em média, "
+                 f"{quem(sw, f'{br(abs(sw))} pontos melhor para {favor}')} do que o esperado. "
+                 f"Isso é o que move a projeção, e não o placar bruto."
+                 + (f'<span class="regs">Diferença em relação ao esperado, por região: {porreg}</span>' if porreg else ""))
+
+    # 3. Onde estão os votos que faltam
+    falt = sorted(ordem, key=lambda k: -regs[k]["validos_faltam"])
+    partes = [f"{REG_NOME[k]} ({br(regs[k]['validos_faltam'] / 1e6, 1)} mi de votos, "
+              f"{br(regs[k]['pct_apurado'], 0)}% apurado, resultado final da região {quem(regs[k]['margem_proj'], vantagem(regs[k]['margem_proj']))})"
+              for k in falt if regs[k]["validos_faltam"] >= 5e4]
+    if partes:
+        itens.append("<b>Onde estão os votos que faltam.</b> Aplicando essa diferença às cidades que ainda não "
+                     "terminaram, o modelo estima quanto falta e para quem cada região pende: " + "; ".join(partes) + ".")
+        k = max(ordem, key=lambda o: abs(regs[o]["saldo_faltam"]))
+        v, resto = regs[k]["saldo_faltam"], efeito - regs[k]["saldo_faltam"]
+        if abs(v) >= 5e4:
+            frase = (f" O que mais pesa: o <b>{REG_NOME[k]}</b>, cujo restante deve render {quem(v, mi(v))}"
+                     + (f", mais do que as outras regiões somadas podem compensar ({quem(resto, mi(resto))})."
+                        if v * resto < 0 and abs(v) > abs(resto) else
+                        f"; as outras regiões somadas: {quem(resto, mi(resto))}." if abs(resto) >= 5e3 else "."))
+            itens[-1] += frase
+
+    # 4. A conta
+    soma = " ".join(("+ " if i else "") + f"{REG_NOME[k]} {quem(regs[k]['saldo_faltam'], mi(regs[k]['saldo_faltam']))}"
+                    for i, k in enumerate(o for o in ordem if abs(regs[o]["saldo_faltam"]) >= 5e4))
+    if any(abs(regs[o]["saldo_faltam"]) < 5e4 for o in ordem):
+        soma += " (demais regiões ≈ 0)"
+    itens.append(f"<b>A conta.</b> Já contado {quem(agora, mi(agora))}, somado ao que falta: {soma or '≈ 0'}. "
+                 f"Resultado projetado: {quem(final, mi(final))} "
+                 f"(diferença final de {quem(r['margem_mediana'], vantagem(r['margem_mediana']) + ' pontos')}).")
+
+    # 5. Por que não é 100%
+    pouco = sorted((k for k in ordem if k != "EX" and regs[k]["validos_faltam"] >= 5e4),
+                   key=lambda k: regs[k]["pct_apurado"])[:2]
+    pc = " e ".join(f"{REG_NOME[k]} ({br(regs[k]['pct_apurado'], 0)}% apurado)" for k in pouco)
+    ganha = "Flávio" if r["p_flavio"] > 0.5 else "Lula"
+    perde = "Lula" if ganha == "Flávio" else "Flávio"
+    itens.append(f"<b>Por que a chance não é 100%.</b> A diferença das cidades que faltam pode não ser igual à "
+                 f"das que já foram contadas, principalmente onde a apuração está mais atrasada"
+                 + (f": {pc}" if pc else "") + ". O modelo sorteia 2.000 cenários com essa incerteza: "
+                 f"em 8 de cada 10, a diferença final fica de {faixa(lo, hi)} pontos, e {perde} vence em "
+                 f"{chance(r['p_flavio'] if perde == 'Flávio' else r['p_lula'])} deles.")
+
+    st.html('<div class="ap-porque"><h4>Por que essa projeção</h4><ol>'
+            + "".join(f"<li>{t}</li>" for t in itens) + "</ol></div>")
 
 
 def mi(v: float, d: int = 1) -> str:

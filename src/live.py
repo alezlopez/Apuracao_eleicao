@@ -248,6 +248,25 @@ def estimar(u: pd.DataFrame, h: Hiper = Hiper()) -> dict:
     uf_rows = agrupar(iu, ufs, "uf")
     reg_rows = agrupar(ir, REGIOES, "regiao")
 
+    # Para explicar a projeção: nas cidades já apuradas, quanto a margem (F−L) está diferente do esperado para
+    # cada uma (o ponto de partida dela, vindo do 1º turno), em pontos, ponderado pelos votos contados.
+    sw_pp = np.full(len(u), np.nan)
+    if obs.any():
+        pobs_all = (u.flavio.to_numpy(float) + 0.5) / (c + 1)
+        sw_pp[obs] = 200 * (pobs_all[obs] - p0[obs])
+
+    def swing_medio(sel: np.ndarray) -> float | None:
+        m = sel & obs
+        return float(np.average(sw_pp[m], weights=c[m])) if m.any() else None
+
+    for row in uf_rows:
+        row["swing_pp"] = swing_medio(iu == ufs.index(row["uf"]))
+        row["cidades_apuradas"] = int(((iu == ufs.index(row["uf"])) & obs).sum())
+    for row in reg_rows:
+        row["swing_pp"] = swing_medio(ir == REGIOES.index(row["regiao"]))
+        row["cidades_apuradas"] = int(((ir == REGIOES.index(row["regiao"])) & obs).sum())
+    swing_nac = swing_medio(np.ones(len(u), bool))
+
     aptos = u.aptos.to_numpy(float)
     restante_aptos = float((aptos * (1 - frac)).sum())
     lead = float(Fc.sum() - Lc.sum())
@@ -265,7 +284,7 @@ def estimar(u: pd.DataFrame, h: Hiper = Hiper()) -> dict:
         "decidido": bool(abs(lead) > restante_aptos), "lider_atual": "Flávio" if lead > 0 else "Lula",
         "atrasado": atr, "atrasado_precisa": precisa,
         "sigma_e": sig_e, "sd_resto": float(sd_resto), "swing_nacional_logit": float(mean[0]), "inclinacao_lean": float(mean[1]),
-        "uf": uf_rows, "regioes": reg_rows,
+        "uf": uf_rows, "regioes": reg_rows, "swing_pp": swing_nac, "cidades_apuradas": int(obs.sum()),
     }
 
 
