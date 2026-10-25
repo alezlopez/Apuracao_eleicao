@@ -34,6 +34,7 @@ LARANJA = "#c98a3a"
 FONTE = "Source Sans 3, Source Sans Pro, sans-serif"
 SNAPS = ROOT / "data" / "snapshots"
 DOMINGO = ["e6258", "e6258-manual"]   # coletor do TSE; entrada manual (plano B)
+EXTERIOR_BU = "e6258-bu"              # boletins de urna do exterior, antes da divulgação oficial
 ENSAIO = "replay-t1-2026"
 N_SIM = 20000
 
@@ -220,8 +221,17 @@ def historico(fonte: str) -> list[dict]:
     return ler_historico(str(root), prontos)
 
 
+def _oficial_comecou() -> bool:
+    snaps = sorted((SNAPS / DOMINGO[0]).glob("*/meta.json")) if (SNAPS / DOMINGO[0]).exists() else []
+    return bool(snaps) and json.loads(snaps[-1].read_text())["br"].get("st", 0) > 0
+
+
 def fonte_domingo() -> str:
-    """Usa o coletor; se a entrada manual tiver dado mais recente (coletor caiu), usa a manual."""
+    """Antes das 17h: boletins do exterior. Depois: o coletor oficial, ou a entrada manual se ela for mais recente."""
+    manual = SNAPS / DOMINGO[1]
+    if not _oficial_comecou() and not (manual.exists() and any(manual.glob("*/uf.csv"))):
+        if (SNAPS / EXTERIOR_BU).exists() and any((SNAPS / EXTERIOR_BU).glob("*/uf.csv")):
+            return EXTERIOR_BU
     melhor, t = DOMINGO[0], -1.0
     for f in DOMINGO:
         root = SNAPS / f
@@ -280,6 +290,9 @@ def aba_ao_vivo():
                 st.markdown(COMO_LER)
             return
         r = hist[-1]
+        if r.get("origem") == "bu":
+            painel_exterior(SNAPS / fonte / r["snapshot"])
+            return
         manchete(r, ensaio)
         with st.expander("Como ler estes números"):
             st.markdown(COMO_LER)
@@ -393,6 +406,100 @@ def estados(r: dict):
         )
         st.caption("Vantagem em pontos percentuais dos votos válidos. A chance de Lula no estado é 100% menos a de Flávio. "
                    "O exterior conta como um estado a mais.")
+
+
+# ================================================================ Exterior (antes das 17h)
+
+@st.cache_data(ttl=120)
+def dados_exterior(snap: str) -> tuple[pd.DataFrame, dict]:
+    sec = pd.read_csv(Path(snap) / "secoes.csv", dtype={"mun": str, "zona": str, "secao": str})
+    meta = json.loads((Path(snap) / "meta.json").read_text())
+    base = pd.read_csv(ROOT / "data" / "base" / "t1_2026_mun.csv", dtype={"cd_tse": str})
+    base["cd_tse"] = base.cd_tse.str.zfill(5)
+    zz = base[base.uf == "zz"].set_index("cd_tse")
+    g = sec.groupby("mun").agg(secoes=("secao", "size"), comp=("comp", "sum"), lula=("lula", "sum"),
+                               flavio=("flavio", "sum"), ultimo=("recebido", "max")).reset_index()
+    g["cidade"] = g.mun.map(zz.nome).str.title()
+    g["lula_1t"] = g.mun.map(100 * zz.lula / (zz.lula + zz.flavio))
+    g["lula_2t"] = 100 * g.lula / (g.lula + g.flavio).where(g.lula + g.flavio > 0)
+    info = {
+        "secoes": int(len(sec)),
+        "aptos_contados": int(sec.aptos.sum()), "aptos_exterior": int(zz.te.sum()), "aptos_brasil": int(base.te.sum()),
+        "lula_1t_exterior": float(100 * zz.lula.sum() / (zz.lula + zz.flavio).sum()),
+        "ultimo": meta.get("ultimo_bu", ""),
+    }
+    return g, info
+
+
+def painel_exterior(snap: Path):
+    g, i = dados_exterior(str(snap))
+    L, F = int(g.lula.sum()), int(g.flavio.sum())
+    v = L + F
+    # O que as mesmas cidades deram no 1º turno, com o peso dos votos contados agora
+    v_c = g.lula + g.flavio
+    esperado = float((g.lula_1t * v_c).sum() / v_c.sum()) if v else float("nan")
+    agora = 100 * L / v if v else float("nan")
+
+    st.html(f'<span class="ap-chip">Antes das 17h</span><span class="ap-chip">último boletim: {i["ultimo"][-8:-3]}</span>'
+            f'<span class="ap-chip">{i["secoes"]} urnas do exterior contadas</span>')
+    st.markdown(
+        "### Votos do exterior, urna por urna\n"
+        "O TSE só soma e divulga o resultado às **17h de Brasília**. Mas, nos países onde a votação já acabou, "
+        "o boletim de cada urna já está publicado no site do TSE. Este painel lê esses boletins oficiais e soma. "
+        "**A chance de vitória nacional só aparece depois das 17h**: o exterior é menos de 1% do eleitorado e vota "
+        "muito diferente do Brasil."
+    )
+    duelo(F / v if v else .5, L / v if v else .5, br(F, 0), br(L, 0),
+          f"votos ({br(100 * F / v)}% dos dois)" if v else "votos", f"votos ({br(100 * L / v)}% dos dois)" if v else "votos")
+    st.caption(f"Votos contados em {i['secoes']} urnas do exterior, com {br(i['aptos_contados'], 0)} eleitores aptos "
+               f"({br(100 * i['aptos_contados'] / i['aptos_exterior'], 0)}% do exterior e "
+               f"{br(100 * i['aptos_contados'] / i['aptos_brasil'], 2)}% do país).")
+
+    if v:
+        delta = agora - esperado
+        quem = "Lula" if delta > 0 else "Flávio"
+        st.markdown(
+            f"#### O placar acima engana. Compare cidade com cidade.\n"
+            f"As primeiras urnas vêm da Ásia e da Oceania, e as maiores são as do **Japão**, onde Flávio teve mais de "
+            f"75% no 1º turno. No exterior inteiro, no 1º turno, Lula teve **{br(i['lula_1t_exterior'])}%** dos votos "
+            f"dados aos dois.\n\n"
+            f"Nas **mesmas cidades** que já foram contadas, Lula tinha **{br(esperado)}%** no 1º turno e agora tem "
+            f"**{br(agora)}%**: {'uma diferença pequena' if abs(delta) < 1 else 'uma mudança'} de "
+            f"**{br(abs(delta))} ponto{'s' if abs(delta) >= 2 else ''} a favor de {quem}**. Parte de qualquer mudança é "
+            f"natural: no 2º turno, quem votou nos outros 10 candidatos precisa escolher entre os dois."
+        )
+        top = g.sort_values("comp", ascending=False).head(15).iloc[::-1]
+        fig = go.Figure()
+        for _, r in top.iterrows():
+            fig.add_trace(go.Scatter(x=[r.lula_1t, r.lula_2t], y=[r.cidade] * 2, mode="lines",
+                                     line=dict(color="#c9c7c0", width=3), hoverinfo="skip", showlegend=False))
+        fig.add_trace(go.Scatter(x=top.lula_1t, y=top.cidade, mode="markers", name="1º turno",
+                                 marker=dict(color="white", size=11, line=dict(color=NEUTRO, width=2)),
+                                 hovertemplate="%{y}: Lula %{x:.1f}% no 1º turno<extra></extra>"))
+        fig.add_trace(go.Scatter(x=top.lula_2t, y=top.cidade, mode="markers", name="agora (2º turno)",
+                                 marker=dict(color=[LULA if x >= 50 else FLAVIO for x in top.lula_2t], size=12,
+                                             line=dict(color="white", width=1.5)),
+                                 customdata=np.c_[top.secoes, top.comp],
+                                 hovertemplate="%{y}: Lula %{x:.1f}% agora<br>%{customdata[0]} urnas, %{customdata[1]} votantes<extra></extra>"))
+        fig.add_vline(x=50, line_color=NEUTRO, line_width=1, line_dash="dot")
+        fig.add_vrect(x0=0, x1=50, fillcolor=FLAVIO_CLARO, line_width=0, layer="below")
+        fig.add_vrect(x0=50, x1=100, fillcolor=LULA_CLARO, line_width=0, layer="below")
+        fig.add_annotation(x=2, y=1.04, yref="paper", xanchor="left", showarrow=False, text="← Flávio na frente", font=dict(color=FLAVIO))
+        fig.add_annotation(x=98, y=1.04, yref="paper", xanchor="right", showarrow=False, text="Lula na frente →", font=dict(color=LULA))
+        layout(fig, h=max(320, 34 * len(top) + 120), title="% de Lula entre os dois: 1º turno x agora",
+               xaxis=dict(range=[0, 100], ticksuffix="%"), yaxis=dict(automargin=True), hovermode="closest",
+               legend=dict(orientation="h", y=-0.15))
+        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+        st.caption("As 15 cidades com mais votos contados. Se a bolinha cheia está à direita do círculo, Lula melhorou "
+                   "naquela cidade em relação ao 1º turno; à esquerda, Flávio melhorou.")
+        with st.expander("Ver todas as cidades contadas"):
+            t = g.sort_values("comp", ascending=False)
+            st.dataframe(pd.DataFrame({
+                "Cidade": t.cidade, "Urnas": t.secoes, "Votantes": t.comp, "Flávio": t.flavio, "Lula": t.lula,
+                "Lula agora (%)": t.lula_2t.round(1), "Lula no 1º turno (%)": t.lula_1t.round(1),
+                "Chegada": t.ultimo.str[-8:-3]}), hide_index=True, width="stretch")
+    st.info("Às 17h, o painel passa sozinho para a apuração oficial do TSE, com a chance de vitória de cada candidato. "
+            "Esta página se atualiza a cada minuto.")
 
 
 # ================================================================ Como funciona

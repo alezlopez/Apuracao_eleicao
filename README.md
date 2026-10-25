@@ -186,3 +186,16 @@ de espera e o **Ensaio** (o 1º turno reapresentado). A aba *Como funciona* expl
   com os controles avançados escondidos. Nomes: Base, Vento a favor de Flávio, Vento a favor de Lula,
   Nordeste vai mais às urnas, Sudeste falta mais, Repete 2022.
 - Regiões e estados aparecem sempre por extenso.
+
+## Exterior antes das 17h (`src/bu.py`, `src/coletor_bu.py`)
+
+O TSE só divulga o total às 17h, mas publica antes o boletim de urna (BU) de cada seção do exterior que já fechou,
+em `arquivo-urna/3221/dados/zz/{mun}/{zona}/{secao}/` (arquivo `-aux.json` com o hash e o `-bu.dat` em ASN.1).
+`src/bu.py` lê o BU; `src/coletor_bu.py` soma as seções do exterior e grava `data/snapshots/e6258-bu/`.
+
+Validação: a soma dos 2.715 BUs do exterior do 1º turno bate exatamente com o oficial do TSE em comparecimento,
+Lula, Flávio e brancos (nulos diferem em 123 votos de candidato anulado depois, contados como "outros").
+
+Antes das 17h o painel mostra a tela "Votos do exterior, urna por urna": o placar cru, a comparação com o 1º turno
+nas mesmas cidades (as primeiras urnas são do Japão, reduto de Flávio) e nenhuma chance nacional. Quando o total
+oficial começa, o coletor de boletins sai sozinho e o painel passa para a apuração oficial.
