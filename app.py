@@ -422,11 +422,17 @@ def aba_apuracao():
     corpo()
 
 
+@st.cache_data(ttl=60)
+def total_oficial(snap: str) -> dict:
+    """Total nacional como o TSE publica (o mesmo da TV). Os arquivos por estado e por cidade chegam depois."""
+    return json.loads((Path(snap) / "meta.json").read_text()).get("br", {})
+
+
 def placar_nacional(r: dict, snap: Path):
-    a = r["pct_apurado"]
+    tot = total_oficial(str(snap))
+    a = 100 * tot["st"] / tot["ts"] if tot.get("ts") else r["pct_apurado"]
     hora = (r.get("tse_ht") or "")[:5]
-    cont = contagem_uf(str(snap))
-    F, L = float(cont.flavio.sum()), float(cont.lula.sum())
+    F, L = float(tot.get("flavio", 0)), float(tot.get("lula", 0))
     v = F + L
     proj_f = 50 + r["margem_mediana"] / 2
     status = "Decidido" if r["decidido"] else "Ao vivo"
@@ -446,7 +452,7 @@ def placar_nacional(r: dict, snap: Path):
 <div class="ap-barra" role="img" aria-label="Chance: Flávio {pct(r['p_flavio'])}, Lula {pct(r['p_lula'])}">
   <span class="f" style="width:{100 * r['p_flavio']:.2f}%"></span><span class="l" style="width:{100 * r['p_lula']:.2f}%"></span></div>
 <div class="ap-legbarra"><span>chance de Flávio</span><span>chance de Lula</span></div>
-<div class="ap-prog"><div class="rot"><span>Urnas apuradas</span><b>{br(a)}%</b></div>
+<div class="ap-prog"><div class="rot"><span>Seções apuradas (TSE)</span><b>{br(a, 2)}%</b></div>
   <div class="trilho"><span style="width:{min(a, 100):.2f}%"></span></div></div>""")
 
     if r.get("origem") == "manual":
@@ -1011,6 +1017,10 @@ def faixa_regioes():
         c = contagem_uf(str(snap))
         g = c.groupby("regiao")[["est", "te", "flavio", "lula"]].sum()
         g.loc["BR"] = c[["est", "te", "flavio", "lula"]].sum()
+        tot = total_oficial(str(snap))
+        if tot.get("ts") and r is not None and r.get("origem") != "bu":
+            # Brasil = total nacional do TSE (o da TV), que chega antes dos arquivos por estado
+            g.loc["BR", ["est", "te", "flavio", "lula"]] = [tot["st"], tot["ts"], tot.get("flavio", 0), tot.get("lula", 0)]
     else:
         g = pd.DataFrame(columns=["est", "te", "flavio", "lula"])
     for cod, nome in [("BR", "Brasil"), ("NE", "Nordeste"), ("SE", "Sudeste"), ("S", "Sul"), ("N", "Norte"),
