@@ -30,7 +30,8 @@ ROOT = Path(__file__).resolve().parent.parent
 BASE_MUN = ROOT / "data" / "base" / "t1_2026_mun.csv"
 LULA, FLAVIO = "13", "22"
 # Encerra antes da divulgação oficial para não disputar com o coletor oficial o limite de pedidos do TSE (mesmo IP).
-HORA_LIMITE = (16, 55)
+HORA_LIMITE = (16, 30)   # meia hora de folga para o freio do TSE (HTTP 429) passar antes das 17h
+PAUSA_FREIO = 300         # segundos parado depois de um ciclo em que o TSE freou
 
 SESSION = requests.Session()
 SESSION.headers["User-Agent"] = "apuracao-eleicao/0.1 (projeto pessoal, estimativa nao oficial)"
@@ -52,9 +53,8 @@ def _get(url: str, binario: bool = False, tentativas: int = 3):
             if r.status_code == 200:
                 return r.content if binario else r.json()
             motivo = f"HTTP {r.status_code}"
-            if r.status_code == 429:          # TSE freando: espera mais antes de insistir
-                time.sleep(5 * (i + 1))
-                continue
+            if r.status_code == 429:          # TSE freando: não insiste; fica para o próximo ciclo
+                break
         except requests.Timeout:
             motivo = "tempo esgotado"
         except requests.RequestException as exc:
@@ -71,7 +71,7 @@ def secoes(pleito: str, uf: str = "zz") -> list[tuple[str, str, str]]:
 
 
 class ColetorBU:
-    def __init__(self, pleito: str, ele: str, uf: str = "zz", workers: int = 4, orcamento: int = 300):
+    def __init__(self, pleito: str, ele: str, uf: str = "zz", workers: int = 2, orcamento: int = 150):
         self.pleito, self.ele, self.uf, self.workers = pleito, ele, uf, workers
         self.cache = ROOT / "data" / "cache" / f"bu-p{pleito}-{uf}"
         self.cache.mkdir(parents=True, exist_ok=True)
@@ -144,7 +144,8 @@ class ColetorBU:
                 if r:
                     lidas[s] = r
         freios = self.falhas.get("HTTP 429", 0)
-        self.orcamento = max(100, self.orcamento // 2) if freios else min(600, int(self.orcamento * 1.5))
+        self.orcamento = max(50, self.orcamento // 2) if freios else min(300, int(self.orcamento * 1.5))
+        self.freado = bool(freios)
         self.resumo = (f"consultadas {len(alvo)} de {len(pend)} pendentes em {time.time() - t0:.0f}s"
                        + (f" | TSE freou {freios} pedidos" if freios else "")
                        + f" | próximo ciclo: até {self.orcamento}")
@@ -241,7 +242,7 @@ def main(argv=None) -> int:
     while True:
         try:
             if a.pleito == "3221" and not a.once and passou_do_horario():
-                print("16h55: coletor de boletins encerrado para deixar o TSE livre para o coletor oficial", flush=True)
+                print("16h30: coletor de boletins encerrado para deixar o TSE livre para o coletor oficial", flush=True)
                 return 0
             if a.pleito == "3221" and not a.once and oficial_comecou():
                 print("divulgação oficial começou; coletor de boletins encerrado", flush=True)
@@ -270,6 +271,9 @@ def main(argv=None) -> int:
                 return 1
         if a.once:
             return 0
+        if col is not None and getattr(col, "freado", False):
+            print(f"TSE freou: pausa de {PAUSA_FREIO // 60} min para não atrapalhar o coletor oficial", flush=True)
+            time.sleep(PAUSA_FREIO)
         time.sleep(a.interval)
 
 

@@ -49,6 +49,9 @@ SESSION = requests.Session()
 SESSION.headers["User-Agent"] = "apuracao-eleicao/0.1 (projeto pessoal, estimativa nao oficial)"
 
 
+FREIOS: list[float] = []   # horários dos HTTP 429 (TSE pedindo para ir mais devagar)
+
+
 def get_json(ele: str, path: str, retries: int = 4) -> dict:
     """path usa {e} como marcador do código da eleição com zeros (e006257)."""
     url = f"{BASE}/{ele}/" + path.format(e=f"e{int(ele):06d}")
@@ -59,6 +62,12 @@ def get_json(ele: str, path: str, retries: int = 4) -> dict:
                 return r.json()
             if r.status_code == 404:
                 raise FileNotFoundError(url)
+            if r.status_code == 429:
+                FREIOS.append(time.time())
+                if i == retries - 1:
+                    break
+                time.sleep(10 * (i + 1))
+                continue
         except (requests.RequestException, ValueError) as exc:
             if i == retries - 1:
                 raise RuntimeError(f"falha em {url}: {exc}") from exc
@@ -113,7 +122,7 @@ def secoes_por_municipio(ele: str, uf: str) -> dict[str, int]:
 
 
 class Collector:
-    def __init__(self, ele: str, workers: int = 16):
+    def __init__(self, ele: str, workers: int = 6, max_mun: int = 1200):
         self.ele = ele
         self.workers = workers
         self.cache_dir = CACHE_DIR / f"e{ele}"
@@ -122,12 +131,17 @@ class Collector:
         self.ufs = sorted(self.muns["uf"].unique())
         self.n = 0
         self.prior = None
+        # Teto de municípios baixados por ciclo: o resto fica para o ciclo seguinte. Cai pela metade se o TSE
+        # frear (HTTP 429) e sobe aos poucos se não. Os totais por UF (28 arquivos) vêm em todo ciclo.
+        self.max_mun = max_mun
+        self.pendentes = 0
 
     def _cache_path(self, uf: str, cd: str) -> Path:
         return self.cache_dir / f"{uf}{cd}.json"
 
     def _fetch_mun(self, uf: str, cd: str) -> None:
-        d = get_json(self.ele, f"dados/{uf}/{uf}{cd}-c0001-{{e}}-u.json")
+        # Arquivo de cidade: uma tentativa só; se o TSE frear, fica para o próximo ciclo.
+        d = get_json(self.ele, f"dados/{uf}/{uf}{cd}-c0001-{{e}}-u.json", retries=1)
         self._cache_path(uf, cd).write_text(json.dumps(d, ensure_ascii=False))
 
     def _ultimo(self) -> dict | None:
@@ -151,15 +165,23 @@ class Collector:
 
         # Baixa só o que mudou (ou ainda não está em cache).
         st_mun = {}
-        todo = []
+        mudou, resto = [], []
         for (uf, cd), st in st_now.items():
             p = self._cache_path(uf, cd)
             cached_st = None
             if p.exists():
                 cached_st = _int(json.loads(p.read_text())["s"]["st"])
-            if recarga or cached_st != st:
-                todo.append((uf, cd))
+            if cached_st != st:
+                mudou.append((abs(st - (cached_st or 0)), uf, cd))
+            elif recarga:
+                resto.append((uf, cd))
             st_mun[(uf, cd)] = st
+        # Primeiro quem mais mudou; a recarga completa (correções) só entra quando sobra espaço no teto.
+        mudou.sort(reverse=True)
+        fila = [(uf, cd) for _, uf, cd in mudou] + resto
+        todo = fila[: self.max_mun]
+        self.pendentes = len(mudou) - min(len(mudou), self.max_mun)
+        n_freios = len(FREIOS)
         errors = []
         with ThreadPoolExecutor(self.workers) as ex:
             futs = {ex.submit(self._fetch_mun, uf, cd): (uf, cd) for uf, cd in todo}
@@ -169,8 +191,11 @@ class Collector:
                 except Exception as exc:  # um município falhar não derruba o snapshot
                     errors.append(f"{futs[f]}: {exc}")
 
+        freios = len(FREIOS) - n_freios
+        self.max_mun = max(200, self.max_mun // 2) if freios else min(3000, int(self.max_mun * 1.5))
+        self.freios = freios
         ult = self._ultimo()
-        if not recarga and not errors and ult and ult["br"].get("st") == br["st"] \
+        if not todo and not errors and ult and ult["br"].get("st") == br["st"] \
                 and ult["br"].get("lula") == br["lula"] and ult["br"].get("flavio") == br["flavio"] \
                 and ult.get("tse_ht") == br["ht"]:
             return None
@@ -240,6 +265,7 @@ def main(argv=None) -> int:
             pct = 100 * br["st"] / br["ts"] if br["ts"] else 0
             print(f"[{meta['coletado_em']}] TSE {meta['tse_ht'] or '-'} | seções {pct:.2f}% | "
                   f"Lula {br['lula']:,} x Flávio {br['flavio']:,} | mun baixados {meta['mun_baixados']} "
+                  f"(faltam {col.pendentes}{', TSE freou ' + str(col.freios) if col.freios else ''}) "
                   f"| erros {len(meta['erros'])} | {meta['segundos']}s -> {out.relative_to(ROOT)}", flush=True)
         except Exception as exc:
             print(f"[{datetime.now():%H:%M:%S}] ciclo falhou: {exc}", file=sys.stderr, flush=True)
