@@ -114,6 +114,12 @@ def unidades_de_uf(snap_uf: pd.DataFrame, prior_mun: pd.DataFrame) -> pd.DataFra
 
 # ---------------------------------------------------------------- motor -----
 
+def sd_resto_regiao(h: "Hiper", f) -> np.ndarray:
+    """Mesma regra do choque do resto, mas com o % apurado da própria região."""
+    f = np.asarray(f, float)
+    return h.sd_resto * np.maximum(1.0, np.sqrt(h.f_min / np.maximum(f, 1e-3)))
+
+
 def estimar(u: pd.DataFrame, h: Hiper = Hiper()) -> dict:
     """u: uid, uf, p0, V0, aptos, flavio, lula, frac (0..1). Retorna projeção nacional e por UF."""
     u = u.reset_index(drop=True).copy()
@@ -192,6 +198,12 @@ def estimar(u: pd.DataFrame, h: Hiper = Hiper()) -> dict:
     f_apur = (u.aptos.to_numpy(float) * frac).sum() / u.aptos.sum()
     sd_resto = h.sd_resto * max(1.0, np.sqrt(h.f_min / max(f_apur, 1e-3)))
     eta = eta + rng.normal(0, sd_resto, (n, 1)) + rng.normal(0, sig_e, (n, falta.sum())).astype(np.float32)
+    # Cautela própria de cada região: uma região bem menos apurada que o país (ex.: Sudeste com 14% quando o país
+    # tem 32%) recebe um choque extra no que falta dela, pela mesma regra do f_min aplicada ao % da região.
+    apt_r = np.bincount(ir, weights=u.aptos.to_numpy(float), minlength=nr)
+    f_reg = np.bincount(ir, weights=u.aptos.to_numpy(float) * frac, minlength=nr) / np.maximum(apt_r, 1)
+    extra = np.sqrt(np.maximum(sd_resto_regiao(h, f_reg) ** 2 - sd_resto ** 2, 0))
+    eta = eta + (rng.standard_normal((n, nr)) * extra)[:, ir[falta]]
     pf = expit(eta)
     turn = np.exp(rng.normal(0, h.sd_turn, (n, 1)) + rng.normal(0, h.sd_turn, (n, nu))[:, iu[falta]])
     R = rest[falta] * rho_uf[iu[falta]] * turn
