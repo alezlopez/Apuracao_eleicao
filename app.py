@@ -116,8 +116,31 @@ st.html("""
   .ap-kpi { background: #fff; border: 1px solid var(--linha); border-radius: 10px; padding: .55rem .75rem; }
   .ap-kpi .k { font-size: .75rem; color: var(--neutro); text-transform: uppercase; letter-spacing: .05em; }
   .ap-kpi .v { font-family: 'Archivo', sans-serif; font-weight: 700; font-size: 1.15rem; font-variant-numeric: tabular-nums; }
-  @media (max-width: 640px) { .ap-duelo { grid-template-columns: 1fr; } .ap-card.l { text-align: left; }
-                              .ap-card.l .linha { flex-direction: row; } }
+  /* Faixa fixa no rodapé: apuração por região, sempre visível */
+  .block-container { padding-bottom: 7.5rem; }
+  .ap-fixo { position: fixed; left: 0; right: 0; bottom: 0; z-index: 999990; background: rgba(255,255,255,.97);
+             border-top: 1px solid var(--linha); box-shadow: 0 -4px 16px rgba(0,0,0,.06);
+             padding: .5rem max(12px, env(safe-area-inset-right, 0px)) calc(.5rem + env(safe-area-inset-bottom, 0px))
+                      max(12px, env(safe-area-inset-left, 0px)); font-family: 'Source Sans 3', sans-serif; }
+  .ap-fixo .lin { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: repeat(7, 1fr); gap: .75rem; }
+  .ap-fixo .c { min-width: 0; }
+  .ap-fixo .t { font-size: .8rem; }
+  .ap-fixo .t b { font-family: 'Archivo', sans-serif; font-weight: 700; color: var(--tinta); white-space: nowrap; }
+  .ap-fixo .b { height: 7px; border-radius: 4px; background: #ecebe7; overflow: hidden; margin: .2rem 0 .15rem; }
+  .ap-fixo .b i { display: block; height: 100%; background: var(--tinta); border-radius: 4px; }
+  .ap-fixo .c.f .b i { background: var(--flavio); } .ap-fixo .c.l .b i { background: var(--lula); }
+  .ap-fixo .v { display: flex; justify-content: space-between; gap: .25rem; font-size: .76rem; color: var(--neutro);
+                white-space: nowrap; }
+  .ap-fixo .v .p { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--tinta); }
+  .ap-fixo .v .q { overflow: hidden; text-overflow: ellipsis; }
+  .ap-fixo .c.f .v .q { color: var(--flavio); font-weight: 600; } .ap-fixo .c.l .v .q { color: var(--lula); font-weight: 600; }
+  .ap-fixo .c.br .t b { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+  @media (max-width: 640px) {
+    .ap-duelo { grid-template-columns: 1fr; } .ap-card.l { text-align: left; } .ap-card.l .linha { flex-direction: row; }
+    .block-container { padding-bottom: 9.5rem; }
+    .ap-fixo .lin { grid-template-columns: repeat(4, 1fr); gap: .35rem .55rem; }
+    .ap-fixo .t { font-size: .7rem; } .ap-fixo .v { font-size: .68rem; } .ap-fixo .b { height: 6px; }
+  }
 </style>
 """)
 
@@ -978,6 +1001,45 @@ def aba_admin():
         (st.success if p.returncode == 0 else st.error)(p.stdout + p.stderr)
 
 
+# ================================================================ faixa fixa =
+
+def faixa_regioes():
+    """Rodapé sempre visível: % apurado e quem lidera a contagem em cada região, no Brasil e no exterior."""
+    r, snap, _ = estado_atual()
+    celulas = []
+    if snap is not None:
+        c = contagem_uf(str(snap))
+        g = c.groupby("regiao")[["est", "te", "flavio", "lula"]].sum()
+        g.loc["BR"] = c[["est", "te", "flavio", "lula"]].sum()
+    else:
+        g = pd.DataFrame(columns=["est", "te", "flavio", "lula"])
+    for cod, nome in [("BR", "Brasil"), ("NE", "Nordeste"), ("SE", "Sudeste"), ("S", "Sul"), ("N", "Norte"),
+                      ("CO", "Centro-Oeste"), ("EX", "Exterior")]:
+        if cod in g.index and g.at[cod, "te"]:
+            apur = 100 * g.at[cod, "est"] / g.at[cod, "te"]
+            f, l = float(g.at[cod, "flavio"]), float(g.at[cod, "lula"])
+        else:
+            apur, f, l = 0.0, 0.0, 0.0
+        # Antes de haver voto apurado no Brasil, a soma do "Brasil" seria só o exterior: não mostra vantagem.
+        domestico = cod == "BR" and (g.drop(index=["EX", "BR"], errors="ignore")[["flavio", "lula"]].to_numpy().sum() == 0)
+        if f + l > 0 and not domestico:
+            m = 100 * (f - l) / (f + l)
+            classe, txt = ("f" if m > 0 else "l"), vantagem(m)
+        else:
+            classe, txt = "", "aguardando"
+        celulas.append(f'<div class="c {classe} {"br" if cod == "BR" else ""}" title="{nome}: {br(apur)}% apurado; '
+                       f'contagem do TSE: {txt}"><div class="t"><b>{nome}</b></div>'
+                       f'<div class="b"><i style="width:{min(apur, 100):.1f}%"></i></div>'
+                       f'<div class="v"><span class="p">{br(apur, 0)}%</span><span class="q">{txt}</span></div></div>')
+    st.html('<div class="ap-fixo" role="region" aria-label="Apuração por região"><div class="lin">'
+            + "".join(celulas) + "</div></div>")
+
+
+@st.fragment(run_every=60)
+def faixa_fixa():
+    faixa_regioes()
+
+
 # ================================================================ página ====
 
 st.html("""
@@ -988,6 +1050,7 @@ st.html("""
   dados públicos do TSE: não é pesquisa e não substitui o resultado oficial.</p>
 </div>""")
 
+faixa_fixa()
 nomes = ["Apuração", "Regiões e estados", "Como funciona", "Cenários pré-apuração"] + (["Administração"] if ADMIN else [])
 tabs = st.tabs(nomes)
 with tabs[0]:
