@@ -55,9 +55,11 @@ class Hiper:
                              # não contaminar o intercepto nacional (replay t1_2026: 118 de 267 unidades às 18h10)
     tau_uf: float = 0.03     # efeito por UF
     sd_turn: float = 0.02    # incerteza log do comparecimento (nacional e por UF)
-    sd_resto: float = 0.04   # choque comum no que falta (logit; ≈2 p.p. de margem). Backtest t1_2026:
-                             # erro RMS da margem da parte não apurada ≈ 2 p.p. nas ordens realistas
-    f_min: float = 0.10      # abaixo disso o choque do resto cresce com sqrt(f_min/f): poucas unidades
+    sd_resto: float = 0.05   # choque comum no que falta (logit; ≈2,5 p.p. de margem). Backtest t1_2026:
+                             # erro RMS ≈ 2 p.p. nas ordens realistas (0,04). Subido para 0,05 no dia 25/10: com a
+                             # votação prorrogada até as 19h, a projeção oscilou ~5 p.p. em minutos (ordem bem torta)
+    f_min: float = 0.30      # abaixo disso o choque do resto cresce com sqrt(f_min/f): poucas unidades (era 0,10;
+                             # subido no dia 25/10 pelo mesmo motivo: 100% para Lula com 7,7% apurado era exagero)
                              # iniciais não representam o resto (replay t1_2026: +7,7 projetado com 1,7%, final +2,0)
     k_turn: float = 2e5      # votos de "pseudo-contagem" no encolhimento do comparecimento por UF
     inflar: float = 1.0      # multiplica a covariância posterior (calibrado no backtest)

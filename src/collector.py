@@ -108,7 +108,19 @@ def parse_result(d: dict) -> dict:
 
 
 def municipios(ele: str) -> pd.DataFrame:
-    cm = get_json(ele, "config/mun-{e}-cm.json")
+    """Lista de municípios. Se o TSE frear (429) na hora de subir, usa a cópia salva ou a base do 1º turno."""
+    copia = CACHE_DIR / f"e{ele}" / "_config-municipios.json"
+    try:
+        cm = get_json(ele, "config/mun-{e}-cm.json")
+        copia.parent.mkdir(parents=True, exist_ok=True)
+        copia.write_text(json.dumps(cm, ensure_ascii=False))
+    except Exception:
+        if copia.exists():
+            cm = json.loads(copia.read_text())
+        else:
+            b = pd.read_csv(ROOT / "data" / "base" / "t1_2026_mun.csv", dtype={"cd_tse": str, "cd_ibge": str})
+            return pd.DataFrame({"uf": b.uf, "cd_tse": b.cd_tse.str.zfill(5), "cd_ibge": b.cd_ibge,
+                                 "nome": b.nome, "capital": False})
     rows = [
         {"uf": a["cd"], "cd_tse": m["cd"], "cd_ibge": m["cdi"], "nome": m["nm"], "capital": m["c"] == "s"}
         for a in cm["abr"] for m in a["mu"]
@@ -136,6 +148,19 @@ class Collector:
         self.max_mun = max_mun
         self.pendentes = 0
 
+    def _ou_ultimo(self, nome: str, fut):
+        """Resultado do pedido; se o TSE falhar, a última versão boa salva (se não houver nenhuma, propaga o erro)."""
+        f = self.cache_dir / f"_{nome}.json"
+        try:
+            v = fut.result()
+            f.write_text(json.dumps(v, ensure_ascii=False))
+            return v
+        except Exception:
+            if f.exists():
+                self.reaproveitados = getattr(self, "reaproveitados", 0) + 1
+                return json.loads(f.read_text())
+            raise
+
     def _cache_path(self, uf: str, cd: str) -> Path:
         return self.cache_dir / f"{uf}{cd}.json"
 
@@ -153,15 +178,17 @@ class Collector:
         """Grava um snapshot e devolve a pasta, ou None quando nada mudou desde o último."""
         t0 = time.time()
         self.n += 1
+        self.reaproveitados = 0
         recarga = self.n % RECARGA_TOTAL == 0
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         with ThreadPoolExecutor(self.workers) as ex:
             br_f = ex.submit(get_json, self.ele, "dados/br/br-c0001-{e}-u.json")
             uf_f = {uf: ex.submit(get_json, self.ele, f"dados/{uf}/{uf}-c0001-{{e}}-u.json") for uf in self.ufs}
             ab_f = {uf: ex.submit(secoes_por_municipio, self.ele, uf) for uf in self.ufs}
-            br = parse_result(br_f.result())
-            uf_rows = {uf: parse_result(f.result()) for uf, f in uf_f.items()}
-            st_now = {(uf, cd): st for uf, f in ab_f.items() for cd, st in f.result().items()}
+            # Um arquivo freado (429) não derruba o ciclo: usa a última versão boa dele.
+            br = parse_result(self._ou_ultimo("br", br_f))
+            uf_rows = {uf: parse_result(self._ou_ultimo(f"uf-{uf}", f)) for uf, f in uf_f.items()}
+            st_now = {(uf, cd): st for uf, f in ab_f.items() for cd, st in self._ou_ultimo(f"ab-{uf}", f).items()}
 
         # Baixa só o que mudou (ou ainda não está em cache).
         st_mun = {}
@@ -265,7 +292,8 @@ def main(argv=None) -> int:
             pct = 100 * br["st"] / br["ts"] if br["ts"] else 0
             print(f"[{meta['coletado_em']}] TSE {meta['tse_ht'] or '-'} | seções {pct:.2f}% | "
                   f"Lula {br['lula']:,} x Flávio {br['flavio']:,} | mun baixados {meta['mun_baixados']} "
-                  f"(faltam {col.pendentes}{', TSE freou ' + str(col.freios) if col.freios else ''}) "
+                  f"(faltam {col.pendentes}{', TSE freou ' + str(col.freios) if col.freios else ''}"
+                  f"{', arquivos de estado reaproveitados ' + str(col.reaproveitados) if col.reaproveitados else ''}) "
                   f"| erros {len(meta['erros'])} | {meta['segundos']}s -> {out.relative_to(ROOT)}", flush=True)
         except Exception as exc:
             print(f"[{datetime.now():%H:%M:%S}] ciclo falhou: {exc}", file=sys.stderr, flush=True)

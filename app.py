@@ -157,6 +157,15 @@ def pct(p: float, d: int = 0) -> str:
     return br(100 * p, d) + "%"
 
 
+def chance(p: float) -> str:
+    """Chance de vitória: nunca "100%" ou "0%" cravados, que nenhuma projeção merece."""
+    if p >= 0.995:
+        return "> 99%"
+    if p <= 0.005:
+        return "< 1%"
+    return pct(p)
+
+
 def vantagem(m: float | None, d: int = 1, dir_nome: str = "Flávio") -> str:
     """Margem (direita − Lula) em pontos, escrita com o nome de quem está à frente."""
     if m is None or (isinstance(m, float) and np.isnan(m)):
@@ -387,7 +396,7 @@ def cartao(nome: str, apurado: float, f: float, l: float, proj: dict | None, m1t
         cls = "f" if proj["margem_proj"] > 0 else "l"
         pf_ = proj["p_flavio"]
         proj_html = (f'<div class="proj">Projeção: <b class="{cls}">{vantagem(proj["margem_proj"])}</b><br>'
-                     f'<span class="t1">Chance: <b class="f">Flávio {pct(pf_)}</b> · <b class="l">Lula {pct(1 - pf_)}</b></span></div>')
+                     f'<span class="t1">Chance: <b class="f">Flávio {chance(pf_)}</b> · <b class="l">Lula {chance(1 - pf_)}</b></span></div>')
     else:
         proj_html = ""
     t1 = f'<div class="t1">1º turno: {vantagem(m1t)}</div>' if m1t is not None else ""
@@ -440,11 +449,11 @@ def placar_nacional(r: dict, snap: Path):
             + ('<span class="ap-chip">dados digitados à mão</span>' if r.get("origem") == "manual" else ""))
     st.html(f"""
 <div class="ap-duelo">
-  <div class="ap-card f"><div class="quem">Flávio Bolsonaro (PL)</div><div class="ap-num">{pct(r['p_flavio'])}</div>
+  <div class="ap-card f"><div class="quem">Flávio Bolsonaro (PL)</div><div class="ap-num">{chance(r['p_flavio'])}</div>
     <div class="sub">chance de vencer</div>
     <div class="linha"><span>Contagem do TSE</span><b>{br(100 * F / v) if v else '—'}% · {br(F, 0)}</b></div>
     <div class="linha"><span>Projeção final</span><b>{br(proj_f)}%</b></div></div>
-  <div class="ap-card l"><div class="quem">Lula (PT)</div><div class="ap-num">{pct(r['p_lula'])}</div>
+  <div class="ap-card l"><div class="quem">Lula (PT)</div><div class="ap-num">{chance(r['p_lula'])}</div>
     <div class="sub">chance de vencer</div>
     <div class="linha"><span>Contagem do TSE</span><b>{br(100 * L / v) if v else '—'}% · {br(L, 0)}</b></div>
     <div class="linha"><span>Projeção final</span><b>{br(100 - proj_f)}%</b></div></div>
@@ -567,7 +576,7 @@ def detalhe_estado(uf: str, r: dict | None, snap: Path | None, hist: list[dict],
         kpis += [("Apurado", f"{br(p['pct_apurado'])}%"),
                  ("Projeção", vantagem(p["margem_proj"])),
                  ("Faixa provável", faixa(p["p10"], p["p90"])),
-                 ("Chance de Flávio", pct(p["p_flavio"])), ("Chance de Lula", pct(1 - p["p_flavio"]))]
+                 ("Chance de Flávio", chance(p["p_flavio"])), ("Chance de Lula", chance(1 - p["p_flavio"]))]
     if c is not None and c.est and c.comp:
         kpis.append(("Comparecimento até agora", f"{br(100 * c.comp / c.est)}%"))
         if c.comp:
