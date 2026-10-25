@@ -43,7 +43,7 @@ SNAP_DIR = ROOT / "data" / "snapshots"
 CACHE_DIR = ROOT / "data" / "cache"
 
 LULA, FLAVIO = "13", "22"
-RECARGA_TOTAL = 20   # ciclos entre recargas completas
+RECARGA_TOTAL = 10**9   # recarga completa desligada: no dia da apuração ela só gerava pedidos inúteis e o freio (429) do TSE
 
 SESSION = requests.Session()
 SESSION.headers["User-Agent"] = "apuracao-eleicao/0.1 (projeto pessoal, estimativa nao oficial)"
@@ -122,7 +122,7 @@ def secoes_por_municipio(ele: str, uf: str) -> dict[str, int]:
 
 
 class Collector:
-    def __init__(self, ele: str, workers: int = 6, max_mun: int = 1200):
+    def __init__(self, ele: str, workers: int = 4, max_mun: int = 800):
         self.ele = ele
         self.workers = workers
         self.cache_dir = CACHE_DIR / f"e{ele}"
@@ -192,7 +192,7 @@ class Collector:
                     errors.append(f"{futs[f]}: {exc}")
 
         freios = len(FREIOS) - n_freios
-        self.max_mun = max(200, self.max_mun // 2) if freios else min(3000, int(self.max_mun * 1.5))
+        self.max_mun = max(200, self.max_mun // 2) if freios else min(1500, int(self.max_mun * 1.5))
         self.freios = freios
         ult = self._ultimo()
         if not todo and not errors and ult and ult["br"].get("st") == br["st"] \
