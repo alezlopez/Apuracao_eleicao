@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -43,6 +44,7 @@ SNAP_DIR = ROOT / "data" / "snapshots"
 CACHE_DIR = ROOT / "data" / "cache"
 
 LULA, FLAVIO = "13", "22"
+PRAZO_CICLO = 45          # segundos: depois disso o ciclo para de baixar cidades e grava o snapshot
 RECARGA_TOTAL = 10**9   # recarga completa desligada: no dia da apuração ela só gerava pedidos inúteis e o freio (429) do TSE
 
 SESSION = requests.Session()
@@ -52,27 +54,40 @@ SESSION.headers["User-Agent"] = "apuracao-eleicao/0.1 (projeto pessoal, estimati
 FREIOS: list[float] = []   # horários dos HTTP 429 (TSE pedindo para ir mais devagar)
 
 
-def get_json(ele: str, path: str, retries: int = 4) -> dict:
-    """path usa {e} como marcador do código da eleição com zeros (e006257)."""
+def get_json(ele: str, path: str, retries: int = 4, prazo: float | None = None) -> dict:
+    """path usa {e} como marcador do código da eleição com zeros (e006257).
+
+    O TSE tem um limite de pedidos compartilhado por todos os usuários que zera a cada segundo
+    (cabeçalho x-ratelimit-limit: 5000;w=1). Na noite da apuração ele estoura o tempo todo e responde 429
+    para qualquer um. Por isso um 429 é repetido logo em seguida (~1 s, com sorteio), até 8 vezes ou até o
+    `prazo` (horário limite do ciclo), e não conta como erro de verdade.
+    """
     url = f"{BASE}/{ele}/" + path.format(e=f"e{int(ele):06d}")
-    for i in range(retries):
+    erros, freios = 0, 0
+    while True:
+        if prazo is not None and time.time() > prazo:
+            raise TimeoutError(f"prazo do ciclo esgotado em {url}")
         try:
-            r = SESSION.get(url, timeout=20)
+            r = SESSION.get(url, timeout=15)
             if r.status_code == 200:
                 return r.json()
             if r.status_code == 404:
                 raise FileNotFoundError(url)
             if r.status_code == 429:
                 FREIOS.append(time.time())
-                if i == retries - 1:
-                    break
-                time.sleep(10 * (i + 1))
+                freios += 1
+                if freios >= 8:
+                    raise RuntimeError(f"falha em {url}: HTTP 429 (8 vezes)")
+                time.sleep(random.uniform(0.6, 1.6))
                 continue
+            erros += 1
+            motivo = f"HTTP {r.status_code}"
         except (requests.RequestException, ValueError) as exc:
-            if i == retries - 1:
-                raise RuntimeError(f"falha em {url}: {exc}") from exc
-        time.sleep(2 ** i)
-    raise RuntimeError(f"falha em {url}: HTTP {r.status_code}")
+            erros += 1
+            motivo = str(exc)
+        if erros >= retries:
+            raise RuntimeError(f"falha em {url}: {motivo}")
+        time.sleep(2 ** erros)
 
 
 def _int(x) -> int:
@@ -134,7 +149,7 @@ def secoes_por_municipio(ele: str, uf: str) -> dict[str, int]:
 
 
 class Collector:
-    def __init__(self, ele: str, workers: int = 4, max_mun: int = 800):
+    def __init__(self, ele: str, workers: int = 6, max_mun: int = 1500):
         self.ele = ele
         self.workers = workers
         self.cache_dir = CACHE_DIR / f"e{ele}"
@@ -165,8 +180,8 @@ class Collector:
         return self.cache_dir / f"{uf}{cd}.json"
 
     def _fetch_mun(self, uf: str, cd: str) -> None:
-        # Arquivo de cidade: uma tentativa só; se o TSE frear, fica para o próximo ciclo.
-        d = get_json(self.ele, f"dados/{uf}/{uf}{cd}-c0001-{{e}}-u.json", retries=1)
+        # Arquivo de cidade: respeita o prazo do ciclo; o que não couber fica para o próximo.
+        d = get_json(self.ele, f"dados/{uf}/{uf}{cd}-c0001-{{e}}-u.json", retries=2, prazo=self.prazo)
         self._cache_path(uf, cd).write_text(json.dumps(d, ensure_ascii=False))
 
     def _ultimo(self) -> dict | None:
@@ -210,16 +225,21 @@ class Collector:
         self.pendentes = len(mudou) - min(len(mudou), self.max_mun)
         n_freios = len(FREIOS)
         errors = []
+        self.adiados = 0
+        # Prazo do ciclo: o site precisa atualizar sempre. O que não for baixado até lá fica para o próximo ciclo.
+        self.prazo = t0 + PRAZO_CICLO
         with ThreadPoolExecutor(self.workers) as ex:
             futs = {ex.submit(self._fetch_mun, uf, cd): (uf, cd) for uf, cd in todo}
             for f in as_completed(futs):
                 try:
                     f.result()
+                except TimeoutError:
+                    self.adiados += 1
                 except Exception as exc:  # um município falhar não derruba o snapshot
                     errors.append(f"{futs[f]}: {exc}")
+        self.pendentes += self.adiados
 
         freios = len(FREIOS) - n_freios
-        self.max_mun = max(200, self.max_mun // 2) if freios else min(1500, int(self.max_mun * 1.5))
         self.freios = freios
         ult = self._ultimo()
         if not todo and not errors and ult and ult["br"].get("st") == br["st"] \
@@ -272,11 +292,12 @@ def main(argv=None) -> int:
     ap.add_argument("--ele", default="6258", help="6257 = 1º turno, 6258 = 2º turno (Presidente)")
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--interval", type=int, default=60, help="segundos entre ciclos")
-    ap.add_argument("--workers", type=int, default=16)
+    ap.add_argument("--workers", type=int, default=6)
     a = ap.parse_args(argv)
 
     col = None
     while True:
+        t_ciclo = time.time()
         try:
             if col is None:
                 col = Collector(a.ele, a.workers)
@@ -285,7 +306,7 @@ def main(argv=None) -> int:
                 print(f"[{datetime.now():%H:%M:%S}] sem novidade no TSE", flush=True)
                 if a.once:
                     return 0
-                time.sleep(a.interval)
+                time.sleep(max(5, a.interval - (time.time() - t_ciclo)))
                 continue
             meta = json.loads((out / "meta.json").read_text())
             br = meta["br"]
@@ -293,7 +314,8 @@ def main(argv=None) -> int:
             print(f"[{meta['coletado_em']}] TSE {meta['tse_ht'] or '-'} | seções {pct:.2f}% | "
                   f"Lula {br['lula']:,} x Flávio {br['flavio']:,} | mun baixados {meta['mun_baixados']} "
                   f"(faltam {col.pendentes}{', TSE freou ' + str(col.freios) if col.freios else ''}"
-                  f"{', arquivos de estado reaproveitados ' + str(col.reaproveitados) if col.reaproveitados else ''}) "
+                  f"{', arquivos de estado reaproveitados ' + str(col.reaproveitados) if col.reaproveitados else ''}"
+                  f"{', adiados para o próximo ciclo ' + str(col.adiados) if col.adiados else ''}) "
                   f"| erros {len(meta['erros'])} | {meta['segundos']}s -> {out.relative_to(ROOT)}", flush=True)
         except Exception as exc:
             print(f"[{datetime.now():%H:%M:%S}] ciclo falhou: {exc}", file=sys.stderr, flush=True)
@@ -301,7 +323,7 @@ def main(argv=None) -> int:
                 return 1
         if a.once:
             return 0
-        time.sleep(a.interval)
+        time.sleep(max(5, a.interval - (time.time() - t_ciclo)))
 
 
 if __name__ == "__main__":
