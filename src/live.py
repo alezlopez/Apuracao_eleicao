@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from dataclasses import dataclass, field
@@ -265,7 +266,9 @@ def processar(snap: Path, prior: pd.DataFrame, h: Hiper = Hiper()) -> dict:
     res["coletado_em"] = meta.get("coletado_em")
     res["tse_ht"] = meta.get("tse_ht")
     res["origem"] = meta.get("origem", "tse")
-    (snap / "projecao.json").write_text(json.dumps(res, ensure_ascii=False, indent=1))
+    tmp = snap / "projecao.json.tmp"     # grava e troca de uma vez: o painel nunca lê arquivo pela metade
+    tmp.write_text(json.dumps(res, ensure_ascii=False, indent=1))
+    os.replace(tmp, snap / "projecao.json")
     return res
 
 

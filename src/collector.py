@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import sys
 import time
@@ -90,6 +91,22 @@ def get_json(ele: str, path: str, retries: int = 4, prazo: float | None = None) 
         time.sleep(2 ** erros)
 
 
+def grava_json(path: Path, obj, **kw) -> None:
+    """Grava num temporário e troca de uma vez: um corte no meio nunca deixa arquivo pela metade."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, **kw))
+    os.replace(tmp, path)
+
+
+def le_json(path: Path):
+    """Lê um JSON do cache; se estiver corrompido, apaga e devolve None (é baixado de novo)."""
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        path.unlink(missing_ok=True)
+        return None
+
+
 def _int(x) -> int:
     return int(x) if x not in (None, "") else 0
 
@@ -128,10 +145,10 @@ def municipios(ele: str) -> pd.DataFrame:
     try:
         cm = get_json(ele, "config/mun-{e}-cm.json")
         copia.parent.mkdir(parents=True, exist_ok=True)
-        copia.write_text(json.dumps(cm, ensure_ascii=False))
+        grava_json(copia, cm)
     except Exception:
-        if copia.exists():
-            cm = json.loads(copia.read_text())
+        if copia.exists() and le_json(copia):
+            cm = le_json(copia)
         else:
             b = pd.read_csv(ROOT / "data" / "base" / "t1_2026_mun.csv", dtype={"cd_tse": str, "cd_ibge": str})
             return pd.DataFrame({"uf": b.uf, "cd_tse": b.cd_tse.str.zfill(5), "cd_ibge": b.cd_ibge,
@@ -168,12 +185,13 @@ class Collector:
         f = self.cache_dir / f"_{nome}.json"
         try:
             v = fut.result()
-            f.write_text(json.dumps(v, ensure_ascii=False))
+            grava_json(f, v)
             return v
         except Exception:
-            if f.exists():
+            v = le_json(f) if f.exists() else None
+            if v is not None:
                 self.reaproveitados = getattr(self, "reaproveitados", 0) + 1
-                return json.loads(f.read_text())
+                return v
             raise
 
     def _cache_path(self, uf: str, cd: str) -> Path:
@@ -182,7 +200,7 @@ class Collector:
     def _fetch_mun(self, uf: str, cd: str) -> None:
         # Arquivo de cidade: respeita o prazo do ciclo; o que não couber fica para o próximo.
         d = get_json(self.ele, f"dados/{uf}/{uf}{cd}-c0001-{{e}}-u.json", retries=2, prazo=self.prazo)
-        self._cache_path(uf, cd).write_text(json.dumps(d, ensure_ascii=False))
+        grava_json(self._cache_path(uf, cd), d)
 
     def _ultimo(self) -> dict | None:
         root = SNAP_DIR / f"e{self.ele}"
@@ -212,7 +230,8 @@ class Collector:
             p = self._cache_path(uf, cd)
             cached_st = None
             if p.exists():
-                cached_st = _int(json.loads(p.read_text())["s"]["st"])
+                d = le_json(p)
+                cached_st = _int(d["s"]["st"]) if d else None
             if cached_st != st:
                 mudou.append((abs(st - (cached_st or 0)), uf, cd))
             elif recarga:
@@ -252,7 +271,10 @@ class Collector:
             p = self._cache_path(m.uf, m.cd_tse)
             if not p.exists():
                 continue
-            r = parse_result(json.loads(p.read_text()))
+            d = le_json(p)
+            if d is None:
+                continue
+            r = parse_result(d)
             r.pop("_cands")
             mun_rows.append({"uf": m.uf, "cd_tse": m.cd_tse, "cd_ibge": m.cd_ibge, "nome": m.nome, **r})
         mun_df = pd.DataFrame(mun_rows)
@@ -271,7 +293,7 @@ class Collector:
             "mun_baixados": len(todo), "mun_total": len(st_now), "mun_no_snapshot": len(mun_df),
             "erros": errors, "segundos": round(time.time() - t0, 1),
         }
-        (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))
+        grava_json(out / "meta.json", meta, indent=1)
         self.projetar(out)
         return out
 

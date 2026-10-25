@@ -287,7 +287,13 @@ def prior_cache(fonte: str) -> pd.DataFrame:
 
 @st.cache_data(ttl=600)
 def ler_historico(root: str, assinatura: tuple) -> list[dict]:
-    return [json.loads((Path(root) / nome / "projecao.json").read_text()) for nome in assinatura]
+    out = []
+    for nome in assinatura:
+        try:
+            out.append(json.loads((Path(root) / nome / "projecao.json").read_text()))
+        except (OSError, ValueError):   # arquivo ruim: pula, o próximo snapshot cobre
+            continue
+    return out
 
 
 def historico(fonte: str) -> list[dict]:
