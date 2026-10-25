@@ -12,7 +12,7 @@ fi
 # Boletins de urna do exterior, antes da divulgação oficial das 17h. Sai sozinho quando o total oficial começa;
 # se falhar por outro motivo, tenta de novo em 30 s.
 (
-  until python src/coletor_bu.py --interval "${INTERVALO_BU:-90}"; do
+  until python src/coletor_bu.py --interval "${INTERVALO_BU:-30}"; do
     echo "coletor de boletins parou; reiniciando em 30 s"
     sleep 30
   done

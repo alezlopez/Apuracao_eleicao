@@ -34,7 +34,14 @@ SESSION = requests.Session()
 SESSION.headers["User-Agent"] = "apuracao-eleicao/0.1 (projeto pessoal, estimativa nao oficial)"
 
 
+class Falha(RuntimeError):
+    def __init__(self, url: str, motivo: str):
+        super().__init__(f"{motivo} em {url}")
+        self.motivo = motivo
+
+
 def _get(url: str, binario: bool = False, tentativas: int = 3):
+    motivo = "?"
     for i in range(tentativas):
         try:
             r = SESSION.get(url, timeout=20)
@@ -42,10 +49,15 @@ def _get(url: str, binario: bool = False, tentativas: int = 3):
                 return None
             if r.status_code == 200:
                 return r.content if binario else r.json()
-        except (requests.RequestException, ValueError):
-            pass
-        time.sleep(1 + i)
-    raise RuntimeError(f"falha em {url}")
+            motivo = f"HTTP {r.status_code}"
+        except requests.Timeout:
+            motivo = "tempo esgotado"
+        except requests.RequestException as exc:
+            motivo = type(exc).__name__
+        except ValueError:
+            motivo = "resposta inválida"
+        time.sleep(1 + 2 * i)
+    raise Falha(url, motivo)
 
 
 def secoes(pleito: str, uf: str = "zz") -> list[tuple[str, str, str]]:
@@ -54,7 +66,7 @@ def secoes(pleito: str, uf: str = "zz") -> list[tuple[str, str, str]]:
 
 
 class ColetorBU:
-    def __init__(self, pleito: str, ele: str, uf: str = "zz", workers: int = 16):
+    def __init__(self, pleito: str, ele: str, uf: str = "zz", workers: int = 6):
         self.pleito, self.ele, self.uf, self.workers = pleito, ele, uf, workers
         self.cache = ROOT / "data" / "cache" / f"bu-p{pleito}-{uf}"
         self.cache.mkdir(parents=True, exist_ok=True)
@@ -84,9 +96,21 @@ class ColetorBU:
         f.write_text(json.dumps(r))
         return r
 
+    def _secao_segura(self, mun: str, zona: str, sec: str):
+        """Uma urna com problema não derruba o ciclo: fica para o próximo."""
+        try:
+            return self._secao(mun, zona, sec)
+        except Falha as exc:
+            self.falhas[exc.motivo] = self.falhas.get(exc.motivo, 0) + 1
+        except Exception as exc:  # BU ilegível etc.
+            k = f"{type(exc).__name__}: {exc}"[:80]
+            self.falhas[k] = self.falhas.get(k, 0) + 1
+        return None
+
     def ciclo(self) -> pd.DataFrame:
+        self.falhas = {}
         with ThreadPoolExecutor(self.workers) as ex:
-            res = list(ex.map(lambda s: self._secao(*s), self.secoes))
+            res = list(ex.map(lambda s: self._secao_segura(*s), self.secoes))
         rows = []
         for r in res:
             if r:
@@ -189,7 +213,8 @@ def main(argv=None) -> int:
             print(f"[{datetime.now():%H:%M:%S}] BUs do exterior: {len(sec)}/{len(col.secoes)} seções | "
                   f"Lula {sec.lula.sum():,} x Flávio {sec.flavio.sum():,}"
                   + (f" ({100 * sec.lula.sum() / v:.1f}% x {100 * sec.flavio.sum() / v:.1f}%)" if v else "")
-                  + f" | {time.time() - t0:.0f}s | " + (f"-> {out.relative_to(ROOT)}" if out else "sem novidade"),
+                  + f" | {time.time() - t0:.0f}s | " + (f"-> {out.relative_to(ROOT)}" if out else "sem novidade")
+                  + (f" | urnas com falha (tenta de novo): {col.falhas}" if col.falhas else ""),
                   flush=True)
         except Exception as exc:
             print(f"[{datetime.now():%H:%M:%S}] ciclo falhou: {exc}", file=sys.stderr, flush=True)
