@@ -225,6 +225,11 @@ def estimar(u: pd.DataFrame, h: Hiper = Hiper()) -> dict:
                 "flavio_contado": float(Fc[sel].sum()), "lula_contado": float(Lc[sel].sum()),
                 "margem_proj": float(np.median(mu)), "p10": float(np.percentile(mu, 10)),
                 "p90": float(np.percentile(mu, 90)), "p_flavio": float((mu > 0).mean()),
+                # o que falta: votos válidos (F+L) ainda por contar e quanto eles devem mexer no saldo (F−L)
+                "validos_faltam": float(np.median((Fu + Lu) - cont)),
+                "saldo_faltam": float(np.median((Fu - Lu) - (Fc[sel].sum() - Lc[sel].sum()))),
+                "saldo_faltam_p10": float(np.percentile((Fu - Lu) - (Fc[sel].sum() - Lc[sel].sum()), 10)),
+                "saldo_faltam_p90": float(np.percentile((Fu - Lu) - (Fc[sel].sum() - Lc[sel].sum()), 90)),
             })
         return rows
 

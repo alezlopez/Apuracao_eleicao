@@ -429,6 +429,7 @@ def aba_apuracao():
         st.html('<div class="ap-sec">Por região</div><p class="ap-secsub">Contagem do TSE (barra), projeção do modelo e '
                 'chance de cada candidato vencer na região. Detalhes por estado na aba <b>Regiões e estados</b>.</p>')
         grade_regioes(r, snap)
+        votos_que_faltam(r)
         st.html('<div class="ap-sec">A noite até agora</div>')
         graficos(hist)
         with st.expander("Como ler estes números"):
@@ -494,6 +495,68 @@ def placar_nacional(r: dict, snap: Path):
     elif a >= 70 and lo < 0 < hi:
         st.warning(f"**Disputa apertada.** Mesmo com {br(a, 0)}% apurado, a faixa provável ainda inclui vitória dos dois. "
                    "Nesse caso, não dá para cravar antes do fim.")
+
+
+def mi(v: float, d: int = 1) -> str:
+    """Saldo em milhões de votos com o nome de quem ganha com ele."""
+    if abs(v) < 5e3:
+        return "≈ 0"
+    return f"{'Flávio' if v > 0 else 'Lula'} +{br(abs(v) / 1e6, d)} mi"
+
+
+def votos_que_faltam(r: dict):
+    """Quanto cada região ainda deve mexer no saldo nacional (o que o modelo espera dos votos não contados)."""
+    regs = [g for g in r.get("regioes", []) if "saldo_faltam" in g]
+    if not regs:
+        return
+    st.html('<div class="ap-sec">Onde estão os votos que faltam</div><p class="ap-secsub">A contagem do TSE mostra só o '
+            'que já chegou. O resultado final depende de <b>quanto falta em cada região</b> e de <b>como cada região vota</b>. '
+            'O gráfico parte do saldo já contado e soma o que o modelo espera do restante de cada região.</p>')
+    peso = base_t1().groupby("regiao").te.sum()
+    peso = 100 * peso / peso.sum()
+    por = {g["regiao"]: g for g in regs}
+    ordem = [k for k in ["NE", "SE", "S", "N", "CO", "EX"] if k in por]
+    agora = float(r["votos_atual"])
+    final = agora + sum(por[k]["saldo_faltam"] for k in ordem)
+
+    fig = go.Figure(go.Waterfall(
+        x=["Já contado"] + [REG_NOME[k] for k in ordem] + ["Resultado projetado"],
+        measure=["absolute"] + ["relative"] * len(ordem) + ["total"],
+        y=[agora / 1e6] + [por[k]["saldo_faltam"] / 1e6 for k in ordem] + [0],
+        text=[mi(agora)] + [mi(por[k]["saldo_faltam"]) for k in ordem] + [mi(final)],
+        textposition="outside", textfont=dict(size=12), cliponaxis=False,
+        connector=dict(line=dict(color="#c9c7c0", width=1)),
+        increasing=dict(marker=dict(color=FLAVIO)), decreasing=dict(marker=dict(color=LULA)),
+        totals=dict(marker=dict(color=FLAVIO if final > 0 else LULA)),
+        hovertemplate="%{x}: %{text}<extra></extra>",
+    ))
+    fig.add_hline(y=0, line_color=NEUTRO, line_width=1)
+    fig.add_annotation(x=0, y=1.02, xref="paper", yref="paper", xanchor="left", showarrow=False,
+                       text="↑ a favor de Flávio · ↓ a favor de Lula", font=dict(color=NEUTRO, size=12))
+    layout(fig, h=440, title="Saldo de votos: contado + o que falta",
+           yaxis=dict(title="milhões de votos", zeroline=False), hovermode="closest", showlegend=False)
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+
+    t = pd.DataFrame([{
+        "Região": REG_NOME[k],
+        "Efeito do que falta no saldo": mi(por[k]["saldo_faltam"]),
+        "Votos que faltam": f"{br(por[k]['validos_faltam'] / 1e6, 1)} mi",
+        "Apurado": por[k]["pct_apurado"],
+        "Peso no eleitorado": peso.get(k, 0) / 100,
+        "Vantagem na contagem": vantagem(por[k]["margem_atual"]),
+        "Faixa provável do efeito": f"{mi(min(por[k]['saldo_faltam_p10'], por[k]['saldo_faltam_p90']))} a "
+                                    f"{mi(max(por[k]['saldo_faltam_p10'], por[k]['saldo_faltam_p90']))}",
+        "Projeção na região": vantagem(por[k]["margem_proj"]),
+    } for k in ordem])
+    st.dataframe(t, hide_index=True, width="stretch", column_config={
+        "Peso no eleitorado": st.column_config.ProgressColumn(min_value=0, max_value=0.5, format="percent"),
+        "Apurado": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.0f%%"),
+    })
+    maior = max(ordem, key=lambda k: abs(por[k]["saldo_faltam"]))
+    st.caption(f"Votos que faltam: válidos para Flávio ou Lula ainda não contados, estimados pelo modelo. "
+               f"Hoje, a região que mais deve mexer no resultado é o **{REG_NOME[maior]}** "
+               f"({mi(por[maior]['saldo_faltam'])}). Os valores somam o resultado projetado (diferenças de arredondamento). "
+               f"O 'já contado' usa os dados por cidade e pode ficar um pouco atrás do total nacional do TSE.")
 
 
 def grade_regioes(r: dict | None, snap: Path | None, so: list[str] | None = None):
@@ -667,6 +730,15 @@ def graficos(hist: list[dict]):
     f2.add_trace(go.Scatter(x=df.apurado, y=df.atual, mode="lines", line=dict(color=NEUTRO, width=2, dash="dot"),
                             name="contagem do TSE", hovertemplate="contagem %{y:+.1f}<extra></extra>"))
     f2.add_hline(y=0, line_width=1, line_color=NEUTRO)
+    # Virada na contagem: quando o líder da contagem do TSE muda (efeito da ordem de chegada das urnas)
+    at = df[df.apurado >= 1].dropna(subset=["atual"])
+    sinais = np.sign(at.atual.to_numpy())
+    for i in range(1, len(sinais)):
+        if sinais[i] != 0 and sinais[i - 1] != 0 and sinais[i] != sinais[i - 1]:
+            xv = float(at.apurado.iloc[i])
+            f2.add_vline(x=xv, line_dash="dash", line_color=NEUTRO, line_width=1)
+            f2.add_annotation(x=xv, y=1, yref="paper", showarrow=False, yanchor="bottom", font=dict(size=11, color=NEUTRO),
+                              text=f"virada na contagem ({at.t.iloc[i]})")
     ok = df[df.apurado >= 1] if (df.apurado >= 1).any() else df   # as primeiras urnas (0,1%) achatariam a escala
     vals = pd.concat([ok.lo, ok.hi, ok.atual.dropna(), pd.Series([0.0])])
     lo_y, hi_y = vals.min() - 1, vals.max() + 1
@@ -677,7 +749,8 @@ def graficos(hist: list[dict]):
     layout(f2, title="Vantagem em pontos: contagem do TSE x projeção", xaxis_title="% das urnas apuradas",
            yaxis=dict(range=[lo_y, hi_y]), legend=dict(orientation="h", y=-0.3))
     c2.plotly_chart(f2, width="stretch")
-    c2.caption("Pontilhada: a contagem do TSE, que oscila muito no começo. Cheia: a projeção do resultado final. "
+    c2.caption("Pontilhada: a contagem do TSE, que muda de líder conforme a ordem em que as regiões chegam. "
+               "Cheia: a projeção do resultado final, que já leva em conta o que falta de cada região. "
                "Faixa cinza: onde o resultado deve cair.")
 
 
