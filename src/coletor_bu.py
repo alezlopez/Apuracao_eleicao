@@ -29,6 +29,8 @@ BASE = "https://resultados.tse.jus.br/oficial/ele2026"
 ROOT = Path(__file__).resolve().parent.parent
 BASE_MUN = ROOT / "data" / "base" / "t1_2026_mun.csv"
 LULA, FLAVIO = "13", "22"
+# Encerra antes da divulgação oficial para não disputar com o coletor oficial o limite de pedidos do TSE (mesmo IP).
+HORA_LIMITE = (16, 55)
 
 SESSION = requests.Session()
 SESSION.headers["User-Agent"] = "apuracao-eleicao/0.1 (projeto pessoal, estimativa nao oficial)"
@@ -50,6 +52,9 @@ def _get(url: str, binario: bool = False, tentativas: int = 3):
             if r.status_code == 200:
                 return r.content if binario else r.json()
             motivo = f"HTTP {r.status_code}"
+            if r.status_code == 429:          # TSE freando: espera mais antes de insistir
+                time.sleep(5 * (i + 1))
+                continue
         except requests.Timeout:
             motivo = "tempo esgotado"
         except requests.RequestException as exc:
@@ -66,11 +71,14 @@ def secoes(pleito: str, uf: str = "zz") -> list[tuple[str, str, str]]:
 
 
 class ColetorBU:
-    def __init__(self, pleito: str, ele: str, uf: str = "zz", workers: int = 12):
+    def __init__(self, pleito: str, ele: str, uf: str = "zz", workers: int = 4, orcamento: int = 300):
         self.pleito, self.ele, self.uf, self.workers = pleito, ele, uf, workers
         self.cache = ROOT / "data" / "cache" / f"bu-p{pleito}-{uf}"
         self.cache.mkdir(parents=True, exist_ok=True)
         self.secoes = secoes(pleito, uf)
+        self.orcamento = orcamento   # pedidos de urnas pendentes por ciclo; cai pela metade se o TSE frear (429)
+        self.ponteiro = 0            # rodízio entre as urnas de cidades que ainda não começaram a chegar
+        self.resumo = ""
 
     def _secao(self, mun: str, zona: str, sec: str) -> dict | None:
         """Lê (com cache) o BU de uma seção. None se ainda não chegou."""
@@ -108,14 +116,39 @@ class ColetorBU:
         return None
 
     def ciclo(self) -> pd.DataFrame:
+        """Um ciclo curto: lê o que já está em cache e consulta só parte das urnas pendentes.
+
+        Primeiro as urnas de cidades que já têm alguma urna recebida (as urnas de uma cidade fecham juntas);
+        depois, em rodízio, as demais. O número de consultas por ciclo se ajusta ao freio do TSE (HTTP 429).
+        """
         self.falhas = {}
-        n, t0, res = len(self.secoes), time.time(), []
+        t0 = time.time()
+        lidas, pend = {}, []
+        for s in self.secoes:
+            f = self.cache / f"{s[0]}-{s[1]}-{s[2]}.json"
+            if f.exists():
+                lidas[s] = json.loads(f.read_text())
+            else:
+                pend.append(s)
+        quentes_cid = {s[0] for s in lidas}
+        quentes = [s for s in pend if s[0] in quentes_cid]
+        frias = [s for s in pend if s[0] not in quentes_cid]
+        if frias:
+            k = self.ponteiro % len(frias)
+            frias = frias[k:] + frias[:k]
+        alvo = (quentes + frias)[: max(self.orcamento, len(quentes))]
+        self.ponteiro += max(0, len(alvo) - len(quentes))
+
         with ThreadPoolExecutor(self.workers) as ex:
-            for i, r in enumerate(ex.map(lambda s: self._secao_segura(*s), self.secoes), 1):
-                res.append(r)
-                if i % 500 == 0 and i < n:
-                    print(f"  ... {i}/{n} urnas consultadas ({sum(x is not None for x in res)} com boletim, "
-                          f"{time.time() - t0:.0f}s)", flush=True)
+            for s, r in zip(alvo, ex.map(lambda x: self._secao_segura(*x), alvo)):
+                if r:
+                    lidas[s] = r
+        freios = self.falhas.get("HTTP 429", 0)
+        self.orcamento = max(100, self.orcamento // 2) if freios else min(600, int(self.orcamento * 1.5))
+        self.resumo = (f"consultadas {len(alvo)} de {len(pend)} pendentes em {time.time() - t0:.0f}s"
+                       + (f" | TSE freou {freios} pedidos" if freios else "")
+                       + f" | próximo ciclo: até {self.orcamento}")
+        res = list(lidas.values())
         rows = []
         for r in res:
             if r:
@@ -168,6 +201,12 @@ def gravar_snapshot(sec: pd.DataFrame, total_secoes: pd.Series) -> Path | None:
     return out
 
 
+def passou_do_horario() -> bool:
+    from zoneinfo import ZoneInfo
+    agora = datetime.now(ZoneInfo("America/Sao_Paulo"))
+    return (agora.hour, agora.minute) >= HORA_LIMITE
+
+
 def oficial_comecou() -> bool:
     d = _get(f"{BASE}/6258/dados/br/br-c0001-e006258-u.json")
     return bool(d) and int(d["s"]["st"] or 0) > 0
@@ -201,6 +240,9 @@ def main(argv=None) -> int:
     col = None
     while True:
         try:
+            if a.pleito == "3221" and not a.once and passou_do_horario():
+                print("16h55: coletor de boletins encerrado para deixar o TSE livre para o coletor oficial", flush=True)
+                return 0
             if a.pleito == "3221" and not a.once and oficial_comecou():
                 print("divulgação oficial começou; coletor de boletins encerrado", flush=True)
                 return 0
@@ -219,6 +261,7 @@ def main(argv=None) -> int:
                   f"Lula {sec.lula.sum():,} x Flávio {sec.flavio.sum():,}"
                   + (f" ({100 * sec.lula.sum() / v:.1f}% x {100 * sec.flavio.sum() / v:.1f}%)" if v else "")
                   + f" | {time.time() - t0:.0f}s | " + (f"-> {out.relative_to(ROOT)}" if out else "sem novidade")
+                  + f" | {col.resumo}"
                   + (f" | urnas com falha (tenta de novo): {col.falhas}" if col.falhas else ""),
                   flush=True)
         except Exception as exc:
